@@ -6,6 +6,8 @@ Wandergrove is a cozy critter-catching mini-game that ships as a **single,
 dependency-free HTML file** — all the art, audio, physics, UI, and save data live
 inside `index.html`. No build step, no server, no network access required.
 
+# https://kctomson.github.io/wandergrove/
+
 The layout is responsive and safe-area aware, so it plays nicely in a narrow
 desktop window or on a phone, with mouse or touch.
 
