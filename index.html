@@ -1,924 +1,2623 @@
 <!DOCTYPE html>
+<!--
+  Wandergrove — a cozy critter-catching mini-game in a single dependency-free file.
+
+  Structure of this document:
+    <style>   1. Base          5. Sheets & intro
+              2. Map           6. (script) helpers & refs
+              3. Creatures     7. audio, species, save, particles
+              4. Encounter     8. map wandering, encounter state machine,
+                               9. input, UI sheets, main loop, autotest hook
+
+  All art is inline SVG, all audio is synthesized with WebAudio, and progress
+  persists in localStorage under the key "wandergrove-v1".
+-->
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#20301c">
-<title>Wandergrove</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;overflow:hidden}
-body{background:#20301c;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
-  user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;color:#243b1e}
-button{font-family:inherit;border:0;cursor:pointer}
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#20301c">
+  <title>Wandergrove</title>
 
-/* ============ MAP ============ */
-#map{position:fixed;inset:0;overflow:hidden;touch-action:manipulation;
-  background:linear-gradient(#8fc6e8 0%,#b5dff2 20%,#dcedc8 30%,#9cc773 38%,#7fb25c 62%,#639a47 100%)}
-#bg{position:absolute;inset:0;overflow:hidden}
-.bgl{position:absolute;top:-4%;left:-4%;width:108%;height:108%;will-change:transform}
-.bgl svg{display:block;width:100%;height:100%}
-#haze{position:absolute;left:0;right:0;top:26%;height:16%;pointer-events:none;
-  background:linear-gradient(rgba(233,245,226,0),rgba(233,245,226,.26) 55%,rgba(233,245,226,0))}
-#vig{position:absolute;inset:0;pointer-events:none;
-  background:radial-gradient(ellipse at 50% 40%,rgba(0,0,0,0) 58%,rgba(18,32,8,.17))}
-.bird{position:absolute;left:0;z-index:2;pointer-events:none;animation:flyAcross 46s linear infinite}
-@keyframes flyAcross{0%{transform:translate(-70px,0)}49%{transform:translate(46vw,-16px)}100%{transform:translate(103vw,4px)}}
-.amb{position:absolute;z-index:3;pointer-events:none}
-.amb svg{display:block;width:100%;height:auto}
-.amb.bfly{width:17px;animation:ambPath 9s ease-in-out infinite alternate}
-.amb.bfly svg{animation:flap .32s ease-in-out infinite alternate}
-.amb.leaf{width:12px;animation:leafDrift 13s ease-in-out infinite alternate}
-@keyframes flap{from{transform:scaleX(.7)}to{transform:scaleX(1.06)}}
-@keyframes ambPath{0%{transform:translate(0,0)}30%{transform:translate(18px,-22px)}60%{transform:translate(-10px,-34px)}100%{transform:translate(14px,-14px)}}
-@keyframes leafDrift{0%{transform:translate(0,0) rotate(0deg)}35%{transform:translate(-22px,26px) rotate(40deg)}70%{transform:translate(14px,44px) rotate(-30deg)}100%{transform:translate(-16px,64px) rotate(25deg)}}
-#field{position:absolute;inset:0;pointer-events:none}
-.crit{position:absolute;left:0;top:0;width:0;height:0;pointer-events:auto;cursor:pointer;z-index:6}
-.crit:active .cwrap{filter:brightness(1.14)}
-.cshadow{position:absolute;left:-24px;top:-5px;width:48px;height:11px;border-radius:50%;
-  background:rgba(20,40,10,.26);filter:blur(2px)}
-.cpw{position:absolute;left:0;transform:translateX(-50%);background:rgba(255,255,255,.94);
-  border-radius:999px;padding:2px 8px;font-size:11px;font-weight:800;letter-spacing:.4px;
-  box-shadow:0 2px 6px rgba(30,60,20,.25);white-space:nowrap;z-index:2}
-.cpw.t1{color:#6b7a4a}.cpw.t2{color:#2f8a52}.cpw.t3{color:#2f6cb8}.cpw.t4{color:#7d3fc4}
-.crit.leaving{opacity:0;transition:opacity .45s ease;pointer-events:none}
-.crit.leaving .chopt{transform:translateY(10px) !important;transition:transform .45s ease}
+  <style>
+    /* ============================================================
+       1. BASE
+       ============================================================ */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
 
-#player{position:absolute;left:50.4%;bottom:3.5%;width:96px;z-index:5;pointer-events:none;
-  transform:translateX(-50%);transition:left 2.4s ease-in-out}
-#player svg{display:block;width:100%;filter:drop-shadow(0 5px 5px rgba(20,40,10,.28));animation:pIdle 3.2s ease-in-out infinite}
-@keyframes pIdle{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
 
-#hud{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:flex-start;
-  padding:calc(10px + env(safe-area-inset-top)) 12px 0;z-index:20;pointer-events:none}
-.chip{background:rgba(255,255,255,.92);border-radius:14px;padding:8px 12px;box-shadow:0 3px 10px rgba(30,60,20,.22)}
-#hudTitle{font-weight:900;font-size:14px;letter-spacing:1.5px;color:#33501f}
-#hudTitle small{display:block;font-weight:600;font-size:10px;letter-spacing:.6px;color:#7a8b5a;margin-top:2px}
-#hudBtns{display:flex;gap:8px;pointer-events:auto}
-#hudBtns button{background:rgba(255,255,255,.92);border-radius:12px;padding:9px 12px;font-weight:800;
-  font-size:12px;color:#33501f;box-shadow:0 3px 10px rgba(30,60,20,.22)}
-#btnJournal{position:fixed;left:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:20;
-  width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,.94);
-  box-shadow:0 3px 12px rgba(30,60,20,.3);display:flex;align-items:center;justify-content:center}
-#mapHint{position:absolute;left:50%;bottom:calc(14px + env(safe-area-inset-bottom));transform:translateX(-50%);
-  background:rgba(28,46,18,.82);color:#eaf4dc;font-size:12px;font-weight:600;padding:8px 14px;border-radius:999px;
-  z-index:20;pointer-events:none;white-space:nowrap}
+    body {
+      background: #20301c;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      color: #243b1e;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
 
-/* ============ creature shared (map + encounter) ============ */
-.chopt{position:absolute;left:0;bottom:0}
-.cwrap{position:absolute;bottom:0;transform-origin:50% 100%}
-.cflip{width:100%;height:100%}
-.cflip svg{display:block;width:100%;height:100%}
-@keyframes aBounce{0%,100%{transform:translateY(0) scale(1,1)}12%{transform:translateY(-2%) scale(1.06,.93)}
-  32%{transform:translateY(-26%) scale(.95,1.07)}55%{transform:translateY(0) scale(1.05,.95)}72%{transform:translateY(0) scale(1,1)}}
-.anim-bounce{animation:aBounce 2.3s ease-in-out infinite}
-@keyframes aSway{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
-.anim-sway{animation:aSway 3.6s ease-in-out infinite}
-@keyframes aJelly{0%,100%{transform:scale(1,1)}25%{transform:scale(1.09,.9)}52%{transform:scale(.94,1.08)}78%{transform:scale(1.04,.97)}}
-.anim-jelly{animation:aJelly 2.7s ease-in-out infinite}
-@keyframes aFlutter{0%,100%{transform:translateY(0)}10%{transform:translateY(-13%)}20%{transform:translateY(0)}
-  30%{transform:translateY(-7%)}40%{transform:translateY(0)}}
-.anim-flutter{animation:aFlutter 2.9s ease-in-out infinite}
-.wing{transform-origin:60% 45%;animation:wingF .45s ease-in-out infinite alternate}
-@keyframes wingF{from{transform:rotate(-8deg)}to{transform:rotate(16deg)}}
-@keyframes aHover{0%,100%{transform:translateY(0)}50%{transform:translateY(-10%)}}
-.anim-hover{animation:aHover 1.9s ease-in-out infinite}
-@keyframes aFloat{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-9%) rotate(2deg)}}
-.anim-float{animation:aFloat 3.6s ease-in-out infinite}
-@keyframes aTrem{0%,100%{transform:translate(0,0)}25%{transform:translate(.8px,-.6px)}75%{transform:translate(-.8px,.6px)}}
-.anim-tremble{animation:aTrem .34s linear infinite}
-@keyframes aShimmy{0%,100%{transform:rotate(-3deg)}50%{transform:rotate(3deg)}}
-.anim-shimmy{animation:aShimmy 1.7s ease-in-out infinite}
-@keyframes aDart{0%,68%,100%{transform:translateY(0) scale(1,1)}74%{transform:translateY(2%) scale(1.08,.9)}
-  84%{transform:translateY(-20%) scale(.95,1.06)}93%{transform:translateY(0) scale(1.04,.96)}}
-.anim-dart{animation:aDart 1.7s ease-in-out infinite}
-@keyframes aPulse{0%,100%{transform:scale(1);filter:drop-shadow(0 0 4px rgba(255,205,90,.55))}
-  50%{transform:scale(1.045);filter:drop-shadow(0 0 14px rgba(255,205,90,.95))}}
-.anim-pulse{animation:aPulse 2.2s ease-in-out infinite}
+    button {
+      font-family: inherit;
+      border: 0;
+      cursor: pointer;
+    }
 
-/* ============ ENCOUNTER ============ */
-#enc{position:fixed;inset:0;display:none;z-index:40;touch-action:none;background:#c2e4f0}
-#enc.on{display:block}
-#encBg{position:absolute;inset:0;overflow:hidden}
-#encPlate{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:flex-start;
-  padding:calc(10px + env(safe-area-inset-top)) 12px 0;z-index:30}
-#btnBack{background:rgba(255,255,255,.95);border-radius:13px;padding:11px 16px;font-weight:900;font-size:13px;
-  color:#2c4a1f;box-shadow:0 3px 12px rgba(30,60,20,.3)}
-#encLabel{position:absolute;left:0;right:0;display:flex;flex-direction:column;align-items:center;gap:5px;
-  z-index:30;pointer-events:none}
-#encNameCard{background:rgba(255,255,255,.94);border-radius:13px;padding:5px 16px 6px;text-align:center;
-  box-shadow:0 3px 10px rgba(30,60,20,.25)}
-#encName{font-weight:900;font-size:14px;color:#33501f;line-height:1.2}
-#encTag{font-size:9px;font-weight:700;color:#7a8b5a;letter-spacing:.5px}
-#encPowCard{background:rgba(255,255,255,.94);border-radius:999px;padding:4px 13px;
-  box-shadow:0 3px 10px rgba(30,60,20,.22)}
-#encPow{font-weight:900;font-size:12.5px;line-height:1}
-#encPow small{font-size:8px;font-weight:800;letter-spacing:1px;color:#7a8b5a;margin-right:4px}
-#flyShadow{position:fixed;left:0;top:0;width:46px;height:12px;margin:-6px 0 0 -23px;border-radius:50%;
-  background:rgba(20,40,10,.3);filter:blur(2px);z-index:24;pointer-events:none;opacity:0;will-change:transform}
-#encCrit{position:absolute;left:50%;top:40%;z-index:10}
-#encCritIn{position:absolute;left:0;top:0;width:100%;height:100%;transition:transform .34s cubic-bezier(.5,0,.8,.4),opacity .34s ease-in}
-#encCritIn.sucked{transform:scale(.04) rotate(70deg) !important;opacity:0}
-#encCritIn.pop{transition:transform .28s cubic-bezier(.2,1.8,.4,1),opacity .15s ease-out}
-#encCritIn.angry{animation:aAngry .45s ease-in-out 2}
-@keyframes aAngry{0%,100%{transform:translateX(0) rotate(0)}25%{transform:translateX(-7px) rotate(-4deg)}
-  75%{transform:translateX(7px) rotate(4deg)}}
-#encCrit .cshadow{left:50%;margin-left:-24%;width:48%;bottom:-6px;top:auto}
-#ring{position:absolute;left:50%;top:40%;width:150px;height:150px;margin:-75px 0 0 -75px;border-radius:50%;
-  border:3px solid rgba(255,255,255,.9);box-shadow:0 0 0 3px rgba(60,110,40,.25),inset 0 0 18px rgba(255,255,255,.35);
-  z-index:9;pointer-events:none;will-change:transform}
-#ring.flash{background:rgba(255,255,255,.4);border-color:#fff}
-#ribbon{position:absolute;left:50%;top:18%;transform:translate(-50%,0) scale(.6);background:rgba(255,255,255,.95);
-  color:#33501f;font-weight:900;font-size:15px;letter-spacing:1px;padding:7px 16px;border-radius:999px;
-  box-shadow:0 4px 12px rgba(30,60,20,.3);opacity:0;z-index:35;pointer-events:none;transition:all .22s cubic-bezier(.2,1.5,.4,1)}
-#ribbon.show{opacity:1;transform:translate(-50%,-10px) scale(1)}
-#pad{position:absolute;left:50%;bottom:70px;width:96px;height:20px;margin-left:-48px;border-radius:50%;
-  background:rgba(20,40,10,.22);filter:blur(2px)}
-#trayHint{position:absolute;left:50%;bottom:calc(34px + env(safe-area-inset-bottom));transform:translateX(-50%);
-  color:#f2f8e6;font-size:12px;font-weight:700;letter-spacing:.4px;text-shadow:0 1px 3px rgba(20,40,10,.5);
-  white-space:nowrap;z-index:12;pointer-events:none}
-#trayLabel{position:absolute;left:50%;bottom:calc(10px + env(safe-area-inset-bottom));transform:translateX(-50%);
-  color:#cfe3b8;font-size:10px;font-weight:800;letter-spacing:1.5px;z-index:12;pointer-events:none}
-#ball{position:fixed;left:0;top:0;width:64px;height:64px;z-index:26;pointer-events:none;will-change:transform}
-#ballIn{width:100%;height:100%;transform-origin:50% 50%}
-#ballIn svg{display:block;width:100%;height:100%}
-#ball.glow #ballIn{filter:drop-shadow(0 0 10px #ffd45e) brightness(1.18)}
-#ball.hide{opacity:0}
-#stamp{position:fixed;left:50%;top:37%;transform:translate(-50%,-50%) rotate(-7deg) scale(2.2);
-  font-weight:900;font-size:46px;letter-spacing:2px;color:#fff;opacity:0;pointer-events:none;z-index:60;
-  text-shadow:0 3px 0 #2c5420,0 6px 18px rgba(20,40,10,.55);white-space:nowrap}
-#stamp.show{animation:stampIn .55s cubic-bezier(.2,1.6,.4,1) forwards}
-@keyframes stampIn{0%{opacity:0;transform:translate(-50%,-50%) rotate(-7deg) scale(2.2)}
-  60%{opacity:1;transform:translate(-50%,-50%) rotate(-7deg) scale(.94)}
-  100%{opacity:1;transform:translate(-50%,-50%) rotate(-7deg) scale(1)}}
-#fx{position:fixed;inset:0;width:100%;height:100%;z-index:50;pointer-events:none}
+    /* ============================================================
+       2. MAP — parallax background layers, ambience, HUD
+       ============================================================ */
+    #map {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      touch-action: manipulation;
+      background: linear-gradient(#8fc6e8 0%, #b5dff2 20%, #dcedc8 30%, #9cc773 38%, #7fb25c 62%, #639a47 100%);
+    }
 
-/* ============ SHEETS & INTRO ============ */
-#sheetBack{position:fixed;inset:0;background:rgba(15,28,10,.45);z-index:60;opacity:0;pointer-events:none;transition:opacity .25s}
-#sheetBack.on{opacity:1;pointer-events:auto}
-#sheet{position:fixed;left:0;right:0;bottom:0;max-height:74%;background:#f7f3e6;z-index:61;
-  border-radius:22px 22px 0 0;transform:translateY(105%);transition:transform .3s cubic-bezier(.3,1.2,.4,1);
-  display:flex;flex-direction:column;box-shadow:0 -8px 30px rgba(10,25,5,.35)}
-#sheet.on{transform:translateY(0)}
-#sheetHead{display:flex;justify-content:space-between;align-items:center;padding:16px 18px 10px}
-#sheetTitle{font-weight:900;font-size:16px;color:#33501f;letter-spacing:.5px}
-#sheetClose{background:#e4dec9;border-radius:10px;padding:7px 12px;font-weight:800;color:#5c6b45;font-size:12px}
-#sheetBody{overflow-y:auto;padding:2px 18px calc(20px + env(safe-area-inset-bottom))}
-.jstat{font-size:11px;font-weight:700;color:#7a8b5a;margin-bottom:12px;letter-spacing:.4px}
-.jgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px}
-.jcard{background:#fff;border-radius:14px;padding:10px 6px;text-align:center;box-shadow:0 2px 8px rgba(60,80,30,.12)}
-.jcard svg{width:52px;height:52px}
-.jcard .jn{font-weight:800;font-size:12px;color:#33501f;margin-top:2px}
-.jcard .jt{font-size:9px;color:#98a67c;font-weight:700;letter-spacing:.4px}
-.jcard .jp{font-weight:900;font-size:12px;margin-top:3px}
-.jcard .jc{font-size:9px;color:#98a67c;margin-top:1px}
-.jp.t1{color:#6b7a4a}.jp.t2{color:#2f8a52}.jp.t3{color:#2f6cb8}.jp.t4{color:#7d3fc4}
-.jempty{text-align:center;color:#8a9a6a;font-weight:600;font-size:13px;padding:26px 10px}
-.gline{display:flex;gap:10px;align-items:flex-start;background:#fff;border-radius:12px;padding:11px 12px;
-  margin-bottom:9px;box-shadow:0 2px 8px rgba(60,80,30,.1)}
-.gnum{background:#3d6b2a;color:#fff;font-weight:900;font-size:12px;border-radius:8px;min-width:22px;height:22px;
-  display:flex;align-items:center;justify-content:center}
-.gtxt{font-size:12.5px;font-weight:600;color:#41562f;line-height:1.45}
-#intro{position:fixed;inset:0;z-index:80;background:linear-gradient(#2c4a1f,#1c3013);display:flex;
-  flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;color:#eaf4dc}
-#intro.hidden{display:none}
-#introLogo{font-size:38px;font-weight:900;letter-spacing:4px;color:#cfe3a6;text-shadow:0 4px 0 #14240c}
-#introSub{margin-top:8px;font-size:13px;font-weight:600;color:#9fbf7e;letter-spacing:.6px}
-#introSteps{margin:30px 0 26px;display:flex;flex-direction:column;gap:10px;max-width:300px}
-#introSteps .gline{background:rgba(255,255,255,.08);box-shadow:none}
-#introSteps .gtxt{color:#dcebc6}
-#introSteps .gnum{background:#5a8f3c}
-#btnStart{background:#8fd18a;color:#1c3013;font-weight:900;font-size:15px;letter-spacing:1px;
-  padding:14px 40px;border-radius:999px;box-shadow:0 6px 0 #4e8a4a}
-#btnStart:active{transform:translateY(3px);box-shadow:0 3px 0 #4e8a4a}
-</style>
+    /* Parallax layers: pointer position pans each layer by a depth-graded
+       offset, applied per frame in updParallax(). Layers are oversized so
+       panning never reveals an edge. */
+    #bg {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    .bgl {
+      position: absolute;
+      top: -4%;
+      left: -4%;
+      width: 108%;
+      height: 108%;
+      will-change: transform;
+    }
+
+    .bgl svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #haze {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 26%;
+      height: 16%;
+      pointer-events: none;
+      background: linear-gradient(rgba(233, 245, 226, 0), rgba(233, 245, 226, .26) 55%, rgba(233, 245, 226, 0));
+    }
+
+    #vig {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(ellipse at 50% 40%, rgba(0, 0, 0, 0) 58%, rgba(18, 32, 8, .17));
+    }
+
+    .bird {
+      position: absolute;
+      left: 0;
+      z-index: 2;
+      pointer-events: none;
+      animation: flyAcross 46s linear infinite;
+    }
+
+    @keyframes flyAcross {
+      0%   { transform: translate(-70px, 0); }
+      49%  { transform: translate(46vw, -16px); }
+      100% { transform: translate(103vw, 4px); }
+    }
+
+    /* Ambient life: butterflies (flap via scaleX oscillation) and leaves. */
+    .amb {
+      position: absolute;
+      z-index: 3;
+      pointer-events: none;
+    }
+
+    .amb svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .amb.bfly {
+      width: 17px;
+      animation: ambPath 9s ease-in-out infinite alternate;
+    }
+
+    .amb.bfly svg {
+      animation: flap .32s ease-in-out infinite alternate;
+    }
+
+    .amb.leaf {
+      width: 12px;
+      animation: leafDrift 13s ease-in-out infinite alternate;
+    }
+
+    @keyframes flap {
+      from { transform: scaleX(.7); }
+      to   { transform: scaleX(1.06); }
+    }
+
+    @keyframes ambPath {
+      0%   { transform: translate(0, 0); }
+      30%  { transform: translate(18px, -22px); }
+      60%  { transform: translate(-10px, -34px); }
+      100% { transform: translate(14px, -14px); }
+    }
+
+    @keyframes leafDrift {
+      0%   { transform: translate(0, 0) rotate(0deg); }
+      35%  { transform: translate(-22px, 26px) rotate(40deg); }
+      70%  { transform: translate(14px, 44px) rotate(-30deg); }
+      100% { transform: translate(-16px, 64px) rotate(25deg); }
+    }
+
+    /* Map critters */
+    #field {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .crit {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 0;
+      height: 0;
+      pointer-events: auto;
+      cursor: pointer;
+      z-index: 6;
+    }
+
+    .crit:active .cwrap {
+      filter: brightness(1.14);
+    }
+
+    .cshadow {
+      position: absolute;
+      left: -24px;
+      top: -5px;
+      width: 48px;
+      height: 11px;
+      border-radius: 50%;
+      background: rgba(20, 40, 10, .26);
+      filter: blur(2px);
+    }
+
+    .cpw {
+      position: absolute;
+      left: 0;
+      transform: translateX(-50%);
+      background: rgba(255, 255, 255, .94);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .4px;
+      box-shadow: 0 2px 6px rgba(30, 60, 20, .25);
+      white-space: nowrap;
+      z-index: 2;
+    }
+
+    .cpw.t1 { color: #6b7a4a; }
+    .cpw.t2 { color: #2f8a52; }
+    .cpw.t3 { color: #2f6cb8; }
+    .cpw.t4 { color: #7d3fc4; }
+
+    .crit.leaving {
+      opacity: 0;
+      transition: opacity .45s ease;
+      pointer-events: none;
+    }
+
+    .crit.leaving .chopt {
+      transform: translateY(10px) !important;
+      transition: transform .45s ease;
+    }
+
+    /* The strolling player. Stands centered on the road; updParallax() keeps
+       his transform glued to the near layer, and playerWalkTo() animates
+       `left` over to the last catch. */
+    #player {
+      position: absolute;
+      left: 50.4%;
+      bottom: 3.5%;
+      width: 96px;
+      z-index: 5;
+      pointer-events: none;
+      transform: translateX(-50%);
+      transition: left 2.4s ease-in-out;
+    }
+
+    #player svg {
+      display: block;
+      width: 100%;
+      filter: drop-shadow(0 5px 5px rgba(20, 40, 10, .28));
+      animation: pIdle 3.2s ease-in-out infinite;
+    }
+
+    @keyframes pIdle {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-3px); }
+    }
+
+    /* HUD */
+    #hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: calc(10px + env(safe-area-inset-top)) 12px 0;
+      z-index: 20;
+      pointer-events: none;
+    }
+
+    .chip {
+      background: rgba(255, 255, 255, .92);
+      border-radius: 14px;
+      padding: 8px 12px;
+      box-shadow: 0 3px 10px rgba(30, 60, 20, .22);
+    }
+
+    #hudTitle {
+      font-weight: 900;
+      font-size: 14px;
+      letter-spacing: 1.5px;
+      color: #33501f;
+    }
+
+    #hudTitle small {
+      display: block;
+      font-weight: 600;
+      font-size: 10px;
+      letter-spacing: .6px;
+      color: #7a8b5a;
+      margin-top: 2px;
+    }
+
+    #hudBtns {
+      display: flex;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    #hudBtns button {
+      background: rgba(255, 255, 255, .92);
+      border-radius: 12px;
+      padding: 9px 12px;
+      font-weight: 800;
+      font-size: 12px;
+      color: #33501f;
+      box-shadow: 0 3px 10px rgba(30, 60, 20, .22);
+    }
+
+    #btnJournal {
+      position: fixed;
+      left: 12px;
+      bottom: calc(12px + env(safe-area-inset-bottom));
+      z-index: 20;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, .94);
+      box-shadow: 0 3px 12px rgba(30, 60, 20, .3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #mapHint {
+      position: absolute;
+      left: 50%;
+      bottom: calc(14px + env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      background: rgba(28, 46, 18, .82);
+      color: #eaf4dc;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 8px 14px;
+      border-radius: 999px;
+      z-index: 20;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    /* ============================================================
+       3. CREATURES — shared markup/animation (map + encounter)
+       ============================================================ */
+    .chopt {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+    }
+
+    .cwrap {
+      position: absolute;
+      bottom: 0;
+      transform-origin: 50% 100%;
+    }
+
+    .cflip {
+      width: 100%;
+      height: 100%;
+    }
+
+    .cflip svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    @keyframes aBounce {
+      0%, 100% { transform: translateY(0) scale(1, 1); }
+      12%      { transform: translateY(-2%) scale(1.06, .93); }
+      32%      { transform: translateY(-26%) scale(.95, 1.07); }
+      55%      { transform: translateY(0) scale(1.05, .95); }
+      72%      { transform: translateY(0) scale(1, 1); }
+    }
+
+    .anim-bounce { animation: aBounce 2.3s ease-in-out infinite; }
+
+    @keyframes aSway {
+      0%, 100% { transform: rotate(-4deg); }
+      50%      { transform: rotate(4deg); }
+    }
+
+    .anim-sway { animation: aSway 3.6s ease-in-out infinite; }
+
+    @keyframes aJelly {
+      0%, 100% { transform: scale(1, 1); }
+      25%      { transform: scale(1.09, .9); }
+      52%      { transform: scale(.94, 1.08); }
+      78%      { transform: scale(1.04, .97); }
+    }
+
+    .anim-jelly { animation: aJelly 2.7s ease-in-out infinite; }
+
+    @keyframes aFlutter {
+      0%, 100% { transform: translateY(0); }
+      10%      { transform: translateY(-13%); }
+      20%      { transform: translateY(0); }
+      30%      { transform: translateY(-7%); }
+      40%      { transform: translateY(0); }
+    }
+
+    .anim-flutter { animation: aFlutter 2.9s ease-in-out infinite; }
+
+    .wing {
+      transform-origin: 60% 45%;
+      animation: wingF .45s ease-in-out infinite alternate;
+    }
+
+    @keyframes wingF {
+      from { transform: rotate(-8deg); }
+      to   { transform: rotate(16deg); }
+    }
+
+    @keyframes aHover {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-10%); }
+    }
+
+    .anim-hover { animation: aHover 1.9s ease-in-out infinite; }
+
+    @keyframes aFloat {
+      0%, 100% { transform: translateY(0) rotate(-2deg); }
+      50%      { transform: translateY(-9%) rotate(2deg); }
+    }
+
+    .anim-float { animation: aFloat 3.6s ease-in-out infinite; }
+
+    @keyframes aTrem {
+      0%, 100% { transform: translate(0, 0); }
+      25%      { transform: translate(.8px, -.6px); }
+      75%      { transform: translate(-.8px, .6px); }
+    }
+
+    .anim-tremble { animation: aTrem .34s linear infinite; }
+
+    @keyframes aShimmy {
+      0%, 100% { transform: rotate(-3deg); }
+      50%      { transform: rotate(3deg); }
+    }
+
+    .anim-shimmy { animation: aShimmy 1.7s ease-in-out infinite; }
+
+    @keyframes aDart {
+      0%, 68%, 100% { transform: translateY(0) scale(1, 1); }
+      74% { transform: translateY(2%) scale(1.08, .9); }
+      84% { transform: translateY(-20%) scale(.95, 1.06); }
+      93% { transform: translateY(0) scale(1.04, .96); }
+    }
+
+    .anim-dart { animation: aDart 1.7s ease-in-out infinite; }
+
+    @keyframes aPulse {
+      0%, 100% { transform: scale(1); filter: drop-shadow(0 0 4px rgba(255, 205, 90, .55)); }
+      50%      { transform: scale(1.045); filter: drop-shadow(0 0 14px rgba(255, 205, 90, .95)); }
+    }
+
+    .anim-pulse { animation: aPulse 2.2s ease-in-out infinite; }
+
+    /* ============================================================
+       4. ENCOUNTER
+       ============================================================ */
+    #enc {
+      position: fixed;
+      inset: 0;
+      display: none;
+      z-index: 40;
+      touch-action: none;
+      background: #c2e4f0;
+    }
+
+    #enc.on {
+      display: block;
+    }
+
+    #encBg {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    #encCrit {
+      position: absolute;
+      left: 50%;
+      top: 40%;
+      z-index: 10;
+    }
+
+    #encCritIn {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      transition: transform .34s cubic-bezier(.5, 0, .8, .4), opacity .34s ease-in;
+    }
+
+    #encCritIn.sucked {
+      transform: scale(.04) rotate(70deg) !important;
+      opacity: 0;
+    }
+
+    #encCritIn.pop {
+      transition: transform .28s cubic-bezier(.2, 1.8, .4, 1), opacity .15s ease-out;
+    }
+
+    #encCritIn.angry {
+      animation: aAngry .45s ease-in-out 2;
+    }
+
+    @keyframes aAngry {
+      0%, 100% { transform: translateX(0) rotate(0); }
+      25%      { transform: translateX(-7px) rotate(-4deg); }
+      75%      { transform: translateX(7px) rotate(4deg); }
+    }
+
+    #encCrit .cshadow {
+      left: 50%;
+      margin-left: -24%;
+      width: 48%;
+      bottom: -6px;
+      top: auto;
+    }
+
+    #ring {
+      position: absolute;
+      left: 50%;
+      top: 40%;
+      width: 150px;
+      height: 150px;
+      margin: -75px 0 0 -75px;
+      border-radius: 50%;
+      border: 3px solid rgba(255, 255, 255, .9);
+      box-shadow: 0 0 0 3px rgba(60, 110, 40, .25), inset 0 0 18px rgba(255, 255, 255, .35);
+      z-index: 9;
+      pointer-events: none;
+      will-change: transform;
+    }
+
+    #ring.flash {
+      background: rgba(255, 255, 255, .4);
+      border-color: #fff;
+    }
+
+    #ribbon {
+      position: absolute;
+      left: 50%;
+      top: 18%;
+      transform: translate(-50%, 0) scale(.6);
+      background: rgba(255, 255, 255, .95);
+      color: #33501f;
+      font-weight: 900;
+      font-size: 15px;
+      letter-spacing: 1px;
+      padding: 7px 16px;
+      border-radius: 999px;
+      box-shadow: 0 4px 12px rgba(30, 60, 20, .3);
+      opacity: 0;
+      z-index: 35;
+      pointer-events: none;
+      transition: all .22s cubic-bezier(.2, 1.5, .4, 1);
+    }
+
+    #ribbon.show {
+      opacity: 1;
+      transform: translate(-50%, -10px) scale(1);
+    }
+
+    #encPlate {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: calc(10px + env(safe-area-inset-top)) 12px 0;
+      z-index: 30;
+    }
+
+    #btnBack {
+      background: rgba(255, 255, 255, .95);
+      border-radius: 13px;
+      padding: 11px 16px;
+      font-weight: 900;
+      font-size: 13px;
+      color: #2c4a1f;
+      box-shadow: 0 3px 12px rgba(30, 60, 20, .3);
+    }
+
+    /* Name + POWER pills float directly above the critter; the exact top
+       offset is computed from the critter's sprite size in openEncounter(). */
+    #encLabel {
+      position: absolute;
+      left: 0;
+      right: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+      z-index: 30;
+      pointer-events: none;
+    }
+
+    #encNameCard {
+      background: rgba(255, 255, 255, .94);
+      border-radius: 13px;
+      padding: 5px 16px 6px;
+      text-align: center;
+      box-shadow: 0 3px 10px rgba(30, 60, 20, .25);
+    }
+
+    #encName {
+      font-weight: 900;
+      font-size: 14px;
+      color: #33501f;
+      line-height: 1.2;
+    }
+
+    #encTag {
+      font-size: 9px;
+      font-weight: 700;
+      color: #7a8b5a;
+      letter-spacing: .5px;
+    }
+
+    #encPowCard {
+      background: rgba(255, 255, 255, .94);
+      border-radius: 999px;
+      padding: 4px 13px;
+      box-shadow: 0 3px 10px rgba(30, 60, 20, .22);
+    }
+
+    #encPow {
+      font-weight: 900;
+      font-size: 12.5px;
+      line-height: 1;
+    }
+
+    #encPow small {
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: #7a8b5a;
+      margin-right: 4px;
+    }
+
+    #pad {
+      position: absolute;
+      left: 50%;
+      bottom: 70px;
+      width: 96px;
+      height: 20px;
+      margin-left: -48px;
+      border-radius: 50%;
+      background: rgba(20, 40, 10, .22);
+      filter: blur(2px);
+    }
+
+    #trayHint {
+      position: absolute;
+      left: 50%;
+      bottom: calc(34px + env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      color: #f2f8e6;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .4px;
+      text-shadow: 0 1px 3px rgba(20, 40, 10, .5);
+      white-space: nowrap;
+      z-index: 12;
+      pointer-events: none;
+    }
+
+    #trayLabel {
+      position: absolute;
+      left: 50%;
+      bottom: calc(10px + env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      color: #cfe3b8;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      z-index: 12;
+      pointer-events: none;
+    }
+
+    /* The Glowseed. #ball is positioned (and depth-scaled) via transform in
+       ballTo(); #flyShadow is the ground shadow that tracks the throw. */
+    #ball {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 64px;
+      height: 64px;
+      z-index: 26;
+      pointer-events: none;
+      will-change: transform;
+    }
+
+    #ballIn {
+      width: 100%;
+      height: 100%;
+      transform-origin: 50% 50%;
+    }
+
+    #ballIn svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #ball.glow #ballIn {
+      filter: drop-shadow(0 0 10px #ffd45e) brightness(1.18);
+    }
+
+    #ball.hide {
+      opacity: 0;
+    }
+
+    #flyShadow {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 46px;
+      height: 12px;
+      margin: -6px 0 0 -23px;
+      border-radius: 50%;
+      background: rgba(20, 40, 10, .3);
+      filter: blur(2px);
+      z-index: 24;
+      pointer-events: none;
+      opacity: 0;
+      will-change: transform;
+    }
+
+    #stamp {
+      position: fixed;
+      left: 50%;
+      top: 37%;
+      transform: translate(-50%, -50%) rotate(-7deg) scale(2.2);
+      font-weight: 900;
+      font-size: 46px;
+      letter-spacing: 2px;
+      color: #fff;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 60;
+      text-shadow: 0 3px 0 #2c5420, 0 6px 18px rgba(20, 40, 10, .55);
+      white-space: nowrap;
+    }
+
+    #stamp.show {
+      animation: stampIn .55s cubic-bezier(.2, 1.6, .4, 1) forwards;
+    }
+
+    @keyframes stampIn {
+      0%   { opacity: 0; transform: translate(-50%, -50%) rotate(-7deg) scale(2.2); }
+      60%  { opacity: 1; transform: translate(-50%, -50%) rotate(-7deg) scale(.94); }
+      100% { opacity: 1; transform: translate(-50%, -50%) rotate(-7deg) scale(1); }
+    }
+
+    #fx {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 50;
+      pointer-events: none;
+    }
+
+    /* ============================================================
+       5. SHEETS & INTRO
+       ============================================================ */
+    #sheetBack {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 28, 10, .45);
+      z-index: 60;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .25s;
+    }
+
+    #sheetBack.on {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #sheet {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      max-height: 74%;
+      background: #f7f3e6;
+      z-index: 61;
+      border-radius: 22px 22px 0 0;
+      transform: translateY(105%);
+      transition: transform .3s cubic-bezier(.3, 1.2, .4, 1);
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 -8px 30px rgba(10, 25, 5, .35);
+    }
+
+    #sheet.on {
+      transform: translateY(0);
+    }
+
+    #sheetHead {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 18px 10px;
+    }
+
+    #sheetTitle {
+      font-weight: 900;
+      font-size: 16px;
+      color: #33501f;
+      letter-spacing: .5px;
+    }
+
+    #sheetClose {
+      background: #e4dec9;
+      border-radius: 10px;
+      padding: 7px 12px;
+      font-weight: 800;
+      color: #5c6b45;
+      font-size: 12px;
+    }
+
+    #sheetBody {
+      overflow-y: auto;
+      padding: 2px 18px calc(20px + env(safe-area-inset-bottom));
+    }
+
+    .jstat {
+      font-size: 11px;
+      font-weight: 700;
+      color: #7a8b5a;
+      margin-bottom: 12px;
+      letter-spacing: .4px;
+    }
+
+    .jgrid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+      gap: 10px;
+    }
+
+    .jcard {
+      background: #fff;
+      border-radius: 14px;
+      padding: 10px 6px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(60, 80, 30, .12);
+    }
+
+    .jcard svg { width: 52px; height: 52px; }
+    .jcard .jn { font-weight: 800; font-size: 12px; color: #33501f; margin-top: 2px; }
+    .jcard .jt { font-size: 9px; color: #98a67c; font-weight: 700; letter-spacing: .4px; }
+    .jcard .jp { font-weight: 900; font-size: 12px; margin-top: 3px; }
+    .jcard .jc { font-size: 9px; color: #98a67c; margin-top: 1px; }
+
+    .jp.t1 { color: #6b7a4a; }
+    .jp.t2 { color: #2f8a52; }
+    .jp.t3 { color: #2f6cb8; }
+    .jp.t4 { color: #7d3fc4; }
+
+    .jempty {
+      text-align: center;
+      color: #8a9a6a;
+      font-weight: 600;
+      font-size: 13px;
+      padding: 26px 10px;
+    }
+
+    .gline {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      background: #fff;
+      border-radius: 12px;
+      padding: 11px 12px;
+      margin-bottom: 9px;
+      box-shadow: 0 2px 8px rgba(60, 80, 30, .1);
+    }
+
+    .gnum {
+      background: #3d6b2a;
+      color: #fff;
+      font-weight: 900;
+      font-size: 12px;
+      border-radius: 8px;
+      min-width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .gtxt {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #41562f;
+      line-height: 1.45;
+    }
+
+    #intro {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      background: linear-gradient(#2c4a1f, #1c3013);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 28px;
+      color: #eaf4dc;
+    }
+
+    #intro.hidden {
+      display: none;
+    }
+
+    #introLogo {
+      font-size: 38px;
+      font-weight: 900;
+      letter-spacing: 4px;
+      color: #cfe3a6;
+      text-shadow: 0 4px 0 #14240c;
+    }
+
+    #introSub {
+      margin-top: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #9fbf7e;
+      letter-spacing: .6px;
+    }
+
+    #introSteps {
+      margin: 30px 0 26px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: 300px;
+    }
+
+    #introSteps .gline {
+      background: rgba(255, 255, 255, .08);
+      box-shadow: none;
+    }
+
+    #introSteps .gtxt {
+      color: #dcebc6;
+    }
+
+    #introSteps .gnum {
+      background: #5a8f3c;
+    }
+
+    #btnStart {
+      background: #8fd18a;
+      color: #1c3013;
+      font-weight: 900;
+      font-size: 15px;
+      letter-spacing: 1px;
+      padding: 14px 40px;
+      border-radius: 999px;
+      box-shadow: 0 6px 0 #4e8a4a;
+    }
+
+    #btnStart:active {
+      transform: translateY(3px);
+      box-shadow: 0 3px 0 #4e8a4a;
+    }
+  </style>
 </head>
 <body>
 
-<!-- ==================== MAP ==================== -->
-<div id="map">
-  <div id="bg">
-    <div class="bgl" id="lySky"><svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
-      <defs>
-        <linearGradient id="skyG" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#6fb4e4"/><stop offset=".45" stop-color="#a5d6ef"/>
-          <stop offset=".78" stop-color="#d3ecf6"/><stop offset="1" stop-color="#e9f5e2"/>
-        </linearGradient>
-        <radialGradient id="sunG"><stop offset="0" stop-color="#fff9d8" stop-opacity=".95"/>
-          <stop offset=".45" stop-color="#ffefad" stop-opacity=".5"/>
-          <stop offset="1" stop-color="#ffefad" stop-opacity="0"/></radialGradient>
-      </defs>
-      <rect width="800" height="600" fill="url(#skyG)"/>
-      <circle cx="648" cy="88" r="120" fill="url(#sunG)"/>
-      <circle cx="648" cy="88" r="30" fill="#fffdf0"/>
-      <g>
-        <ellipse cx="150" cy="90" rx="52" ry="16" fill="#cfe6f4"/><ellipse cx="192" cy="78" rx="34" ry="13" fill="#d9edf7"/><ellipse cx="112" cy="82" rx="30" ry="11" fill="#d2e8f4"/>
-        <ellipse cx="150" cy="84" rx="50" ry="15" fill="#fff"/><ellipse cx="188" cy="72" rx="32" ry="12" fill="#fff"/><ellipse cx="114" cy="76" rx="28" ry="10" fill="#fdfefe"/>
-      </g>
-      <g opacity=".8">
-        <ellipse cx="430" cy="151" rx="44" ry="12" fill="#d5eaf5"/><ellipse cx="428" cy="146" rx="42" ry="11" fill="#fff"/><ellipse cx="464" cy="137" rx="25" ry="9" fill="#fff"/>
-      </g>
-      <g fill="#fff" opacity=".55">
-        <ellipse cx="300" cy="52" rx="36" ry="10"/><ellipse cx="328" cy="44" rx="22" ry="8"/>
-      </g>
-    </svg></div>
-    <div class="bird" style="top:15%;animation-duration:46s">
-      <svg width="26" height="10" viewBox="0 0 26 10"><path d="M1 7 Q7 1 13 7 Q19 1 25 7" fill="none" stroke="#3d5a6b" stroke-width="1.6" stroke-linecap="round" opacity=".65"/></svg>
+  <!-- ==================== MAP ==================== -->
+  <div id="map">
+
+    <!-- Parallax background: sky / far hills / mid hills / near meadow -->
+    <div id="bg">
+      <div class="bgl" id="lySky">
+        <svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
+          <defs>
+            <linearGradient id="skyG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#6fb4e4"/>
+              <stop offset=".45" stop-color="#a5d6ef"/>
+              <stop offset=".78" stop-color="#d3ecf6"/>
+              <stop offset="1" stop-color="#e9f5e2"/>
+            </linearGradient>
+            <radialGradient id="sunG">
+              <stop offset="0" stop-color="#fff9d8" stop-opacity=".95"/>
+              <stop offset=".45" stop-color="#ffefad" stop-opacity=".5"/>
+              <stop offset="1" stop-color="#ffefad" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <rect width="800" height="600" fill="url(#skyG)"/>
+          <circle cx="648" cy="88" r="120" fill="url(#sunG)"/>
+          <circle cx="648" cy="88" r="30" fill="#fffdf0"/>
+          <g>
+            <ellipse cx="150" cy="90" rx="52" ry="16" fill="#cfe6f4"/>
+            <ellipse cx="192" cy="78" rx="34" ry="13" fill="#d9edf7"/>
+            <ellipse cx="112" cy="82" rx="30" ry="11" fill="#d2e8f4"/>
+            <ellipse cx="150" cy="84" rx="50" ry="15" fill="#fff"/>
+            <ellipse cx="188" cy="72" rx="32" ry="12" fill="#fff"/>
+            <ellipse cx="114" cy="76" rx="28" ry="10" fill="#fdfefe"/>
+          </g>
+          <g opacity=".8">
+            <ellipse cx="430" cy="151" rx="44" ry="12" fill="#d5eaf5"/>
+            <ellipse cx="428" cy="146" rx="42" ry="11" fill="#fff"/>
+            <ellipse cx="464" cy="137" rx="25" ry="9" fill="#fff"/>
+          </g>
+          <g fill="#fff" opacity=".55">
+            <ellipse cx="300" cy="52" rx="36" ry="10"/>
+            <ellipse cx="328" cy="44" rx="22" ry="8"/>
+          </g>
+        </svg>
+      </div>
+
+      <div class="bird" style="top:15%;animation-duration:46s">
+        <svg width="26" height="10" viewBox="0 0 26 10">
+          <path d="M1 7 Q7 1 13 7 Q19 1 25 7" fill="none" stroke="#3d5a6b" stroke-width="1.6" stroke-linecap="round" opacity=".65"/>
+        </svg>
+      </div>
+      <div class="bird" style="top:10%;animation-duration:61s;animation-delay:-24s">
+        <svg width="18" height="7" viewBox="0 0 26 10">
+          <path d="M1 7 Q7 1 13 7 Q19 1 25 7" fill="none" stroke="#3d5a6b" stroke-width="1.8" stroke-linecap="round" opacity=".5"/>
+        </svg>
+      </div>
+
+      <div class="bgl" id="lyFar">
+        <svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
+          <defs>
+            <linearGradient id="hazeG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#dcefe2" stop-opacity="0"/>
+              <stop offset=".5" stop-color="#dcefe2" stop-opacity=".18"/>
+              <stop offset="1" stop-color="#dcefe2" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path d="M0 322 L60 252 L130 302 L210 226 L290 296 L370 246 L450 306 L540 236 L620 294 L700 252 L800 312 L800 600 L0 600 Z" fill="#a9c3cf" opacity=".75"/>
+          <path d="M210 226 L224 246 L212 244 L204 250 L196 240 Z" fill="#f2f7f8" opacity=".85"/>
+          <path d="M540 236 L554 256 L542 254 L534 260 L526 250 Z" fill="#f2f7f8" opacity=".8"/>
+          <path d="M60 252 L72 268 L62 266 L52 272 L46 262 Z" fill="#eef4f5" opacity=".7"/>
+          <path d="M700 252 L712 268 L702 266 L692 272 L686 262 Z" fill="#eef4f5" opacity=".7"/>
+          <path d="M0 362 Q90 302 180 338 Q270 374 360 332 Q470 284 560 328 Q660 370 800 320 L800 600 L0 600 Z" fill="#9fc0ac" opacity=".8"/>
+          <path d="M0 362 Q90 302 180 338 Q270 374 360 332 Q470 284 560 328 Q660 370 800 320" fill="none" stroke="#b9d4c0" stroke-width="5" opacity=".55"/>
+          <g fill="#6f9e78" opacity=".7">
+            <circle cx="120" cy="352" r="5"/><circle cx="132" cy="356" r="4"/><circle cx="126" cy="360" r="3.4"/>
+            <circle cx="420" cy="330" r="5"/><circle cx="432" cy="334" r="4"/><circle cx="414" cy="336" r="3.4"/>
+            <circle cx="640" cy="352" r="5"/><circle cx="652" cy="356" r="4"/><circle cx="634" cy="357" r="3.4"/>
+          </g>
+          <path d="M0 394 Q120 350 240 378 Q400 412 520 374 Q660 336 800 386 L800 600 L0 600 Z" fill="#8ab594" opacity=".85"/>
+          <path d="M0 394 Q120 350 240 378 Q400 412 520 374 Q660 336 800 386" fill="none" stroke="#a5ccae" stroke-width="5" opacity=".5"/>
+          <g opacity=".4">
+            <ellipse cx="200" cy="432" rx="60" ry="10" fill="#a8ccb0"/>
+            <ellipse cx="560" cy="440" rx="70" ry="11" fill="#79a888"/>
+            <ellipse cx="740" cy="426" rx="40" ry="8" fill="#a8ccb0"/>
+          </g>
+          <g fill="#6b9772" opacity=".85">
+            <ellipse cx="40" cy="390" rx="22" ry="10"/><ellipse cx="96" cy="396" rx="18" ry="9"/>
+            <ellipse cx="150" cy="388" rx="24" ry="11"/><ellipse cx="240" cy="396" rx="20" ry="9"/>
+            <ellipse cx="332" cy="398" rx="24" ry="11"/><ellipse cx="420" cy="390" rx="22" ry="10"/>
+            <ellipse cx="508" cy="396" rx="20" ry="9"/><ellipse cx="562" cy="392" rx="26" ry="12"/>
+            <ellipse cx="648" cy="396" rx="20" ry="10"/><ellipse cx="702" cy="398" rx="22" ry="10"/>
+            <ellipse cx="762" cy="390" rx="18" ry="9"/>
+          </g>
+          <rect y="300" width="800" height="150" fill="url(#hazeG)"/>
+        </svg>
+      </div>
+
+      <div class="bgl" id="lyMid">
+        <svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
+          <defs>
+            <linearGradient id="midH" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#8cba66"/>
+              <stop offset="1" stop-color="#79aa58"/>
+            </linearGradient>
+          </defs>
+          <path d="M0 442 Q140 398 300 430 Q460 460 620 422 Q720 400 800 426 L800 600 L0 600 Z" fill="url(#midH)"/>
+          <g opacity=".45">
+            <ellipse cx="200" cy="472" rx="70" ry="12" fill="#8fc06a"/>
+            <ellipse cx="560" cy="500" rx="90" ry="14" fill="#6f9e4e"/>
+            <ellipse cx="740" cy="470" rx="50" ry="10" fill="#8fc06a"/>
+          </g>
+          <g transform="translate(110 424)">
+            <rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/>
+            <circle cx="0" cy="-40" r="22" fill="#4e7a44"/>
+            <circle cx="-15" cy="-29" r="14" fill="#5d8f4f"/>
+            <circle cx="14" cy="-30" r="13" fill="#456f3c"/>
+          </g>
+          <g transform="translate(268 436) scale(.85)">
+            <rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/>
+            <circle cx="0" cy="-40" r="20" fill="#5d8f4f"/>
+            <circle cx="13" cy="-29" r="12" fill="#4e7a44"/>
+          </g>
+          <g transform="translate(190 452) scale(.66)">
+            <rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/>
+            <circle cx="0" cy="-40" r="21" fill="#5d8f4f"/>
+            <circle cx="-13" cy="-30" r="13" fill="#4e7a44"/>
+          </g>
+          <g transform="translate(360 462) scale(.6)">
+            <rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/>
+            <circle cx="0" cy="-40" r="20" fill="#456f3c"/>
+            <circle cx="12" cy="-30" r="12" fill="#5d8f4f"/>
+          </g>
+          <g transform="translate(472 440) scale(.78)">
+            <rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/>
+            <circle cx="0" cy="-40" r="21" fill="#456f3c"/>
+            <circle cx="-14" cy="-30" r="13" fill="#5d8f4f"/>
+          </g>
+          <g transform="translate(560 452) scale(.66)">
+            <rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/>
+            <circle cx="0" cy="-40" r="21" fill="#4e7a44"/>
+            <circle cx="13" cy="-30" r="12" fill="#5d8f4f"/>
+          </g>
+          <g transform="translate(664 416) scale(.9)">
+            <rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/>
+            <circle cx="0" cy="-40" r="23" fill="#4e7a44"/>
+            <circle cx="15" cy="-29" r="14" fill="#5d8f4f"/>
+            <circle cx="-13" cy="-31" r="12" fill="#456f3c"/>
+          </g>
+          <g transform="translate(744 446) scale(.7)">
+            <rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/>
+            <circle cx="0" cy="-40" r="20" fill="#5d8f4f"/>
+            <circle cx="-12" cy="-30" r="12" fill="#456f3c"/>
+          </g>
+          <g fill="#5d8f4f">
+            <ellipse cx="60" cy="470" rx="16" ry="9"/>
+            <ellipse cx="86" cy="476" rx="12" ry="7"/>
+            <ellipse cx="440" cy="478" rx="14" ry="8"/>
+            <ellipse cx="620" cy="470" rx="15" ry="8"/>
+            <ellipse cx="320" cy="490" rx="13" ry="7"/>
+          </g>
+        </svg>
+      </div>
+
+      <div class="bgl" id="lyNear">
+        <svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
+          <defs>
+            <linearGradient id="grG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#85b563"/>
+              <stop offset=".55" stop-color="#74a854"/>
+              <stop offset="1" stop-color="#5f9443"/>
+            </linearGradient>
+            <linearGradient id="pathG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#ecdca8"/>
+              <stop offset="1" stop-color="#d3bd85"/>
+            </linearGradient>
+            <radialGradient id="pondG" cx=".42" cy=".35" r=".75">
+              <stop offset="0" stop-color="#a8ddf0"/>
+              <stop offset=".65" stop-color="#6db5d6"/>
+              <stop offset="1" stop-color="#549cc2"/>
+            </radialGradient>
+            <g id="tuft">
+              <g stroke="#4e8a3c" stroke-width="2" stroke-linecap="round" fill="none">
+                <path d="M0 0 Q-3 -8 -6 -12"/>
+                <path d="M0 0 Q0 -10 1 -14"/>
+                <path d="M0 0 Q4 -8 7 -11"/>
+              </g>
+            </g>
+            <g id="flw">
+              <circle cx="0" cy="-3.4" r="2"/>
+              <circle cx="3.2" cy="-1.1" r="2"/>
+              <circle cx="2" cy="2.8" r="2"/>
+              <circle cx="-2" cy="2.8" r="2"/>
+              <circle cx="-3.2" cy="-1.1" r="2"/>
+            </g>
+          </defs>
+
+          <path d="M0 454 Q60 436 124 448 Q200 462 276 446 Q356 430 436 450 Q516 468 596 448 Q686 428 800 452 L800 600 L0 600 Z" fill="url(#grG)"/>
+          <g opacity=".5">
+            <ellipse cx="120" cy="482" rx="88" ry="15" fill="#82b760"/>
+            <ellipse cx="648" cy="540" rx="118" ry="19" fill="#699e4c"/>
+            <ellipse cx="420" cy="580" rx="90" ry="14" fill="#79ad58"/>
+            <ellipse cx="60" cy="566" rx="70" ry="12" fill="#6da04f"/>
+            <ellipse cx="520" cy="472" rx="60" ry="10" fill="#86bd64"/>
+          </g>
+
+          <path d="M282 600 Q368 470 384 352 Q390 318 394 300 L428 300 Q424 330 446 420 Q474 522 524 600 Z" fill="url(#pathG)"/>
+          <path d="M394 300 Q390 318 384 352 Q368 470 282 600 L296 600 Q380 472 396 354 Q401 322 405 300 Z" fill="#f2e6bc" opacity=".45"/>
+          <g stroke="#c4ad78" stroke-width="3" stroke-linecap="round" fill="none" opacity=".6">
+            <path d="M386 460 Q384 500 376 540"/>
+            <path d="M440 470 Q446 510 456 548"/>
+          </g>
+          <g fill="#c2ab77" opacity=".8">
+            <ellipse cx="372" cy="470" rx="6" ry="3.4"/>
+            <ellipse cx="470" cy="500" rx="7" ry="4"/>
+            <ellipse cx="404" cy="560" rx="6" ry="3.4"/>
+            <ellipse cx="350" cy="540" rx="5" ry="3"/>
+          </g>
+
+          <ellipse cx="295" cy="520" rx="88" ry="31" fill="#568544"/>
+          <ellipse cx="295" cy="516" rx="80" ry="27" fill="url(#pondG)"/>
+          <ellipse cx="272" cy="508" rx="32" ry="9" fill="#d4effa" opacity=".75"/>
+          <ellipse cx="326" cy="526" rx="15" ry="5" fill="#bfe6f2" opacity=".55"/>
+          <g fill="none" stroke="#eaf7fc" stroke-width="1.6" opacity=".6">
+            <path d="M250 528 Q262 533 276 530"/>
+            <path d="M306 534 Q318 538 330 534"/>
+          </g>
+          <ellipse cx="338" cy="512" rx="9" ry="4.4" fill="#4e8a3f"/>
+          <circle cx="338" cy="510.6" r="1.8" fill="#f6cde0"/>
+          <g stroke="#3e6d33" stroke-width="2.4" stroke-linecap="round" fill="none">
+            <path d="M232 500 Q228 486 233 476"/>
+            <path d="M241 502 Q243 486 239 476"/>
+            <path d="M225 502 Q222 490 224 482"/>
+          </g>
+          <ellipse cx="233" cy="474" rx="2.6" ry="6" fill="#7a4e2a"/>
+
+          <g fill="#3f7a30" opacity=".85">
+            <circle cx="540" cy="470" r="2.2"/><circle cx="546" cy="474" r="2.2"/><circle cx="535" cy="475" r="2.2"/>
+            <circle cx="140" cy="500" r="2.2"/><circle cx="146" cy="504" r="2.2"/><circle cx="135" cy="505" r="2.2"/>
+          </g>
+
+          <g transform="translate(88 470)">
+            <ellipse cx="2" cy="58" rx="44" ry="10" fill="#3f6a30" opacity=".3"/>
+            <path d="M-8 60 L-4 -8 L5 -8 L8 60 Z" fill="#7a5a38"/>
+            <path d="M-6 22 L-22 -4 M6 32 L20 6" stroke="#7a5a38" stroke-width="5" stroke-linecap="round"/>
+            <circle cx="0" cy="-40" r="38" fill="#4e7a44"/>
+            <circle cx="-26" cy="-22" r="24" fill="#5d8f4f"/>
+            <circle cx="25" cy="-24" r="22" fill="#456f3c"/>
+            <circle cx="-6" cy="-54" r="17" fill="#69a355"/>
+            <circle cx="16" cy="-14" r="3" fill="#c9e2a8" opacity=".8"/>
+            <circle cx="-18" cy="-30" r="2.6" fill="#c9e2a8" opacity=".7"/>
+          </g>
+          <g transform="translate(716 462) scale(.92)">
+            <ellipse cx="2" cy="60" rx="42" ry="10" fill="#3f6a30" opacity=".3"/>
+            <path d="M-8 60 L-4 -8 L5 -8 L8 60 Z" fill="#82613f"/>
+            <circle cx="0" cy="-38" r="36" fill="#5d8f4f"/>
+            <circle cx="-25" cy="-20" r="22" fill="#4e7a44"/>
+            <circle cx="24" cy="-22" r="21" fill="#69a355"/>
+            <circle cx="-4" cy="-52" r="15" fill="#7fb563"/>
+            <circle cx="-14" cy="-16" r="2.6" fill="#d4ecb2" opacity=".8"/>
+          </g>
+
+          <g fill="#9a9a90">
+            <path d="M608 560 Q614 548 628 550 Q642 552 640 562 Q638 570 624 570 Q610 570 608 560 Z"/>
+            <path d="M588 566 Q592 560 600 561 Q607 563 605 569 Q603 573 596 572 Q590 571 588 566 Z" fill="#a8a89e"/>
+          </g>
+
+          <use href="#tuft" x="180" y="452"/>
+          <use href="#tuft" x="520" y="446"/>
+          <use href="#tuft" x="620" y="480"/>
+          <use href="#tuft" x="80" y="560"/>
+          <use href="#tuft" x="220" y="576"/>
+          <use href="#tuft" x="420" y="440"/>
+          <use href="#tuft" x="700" y="540"/>
+          <use href="#tuft" x="760" y="470"/>
+          <use href="#tuft" x="320" y="470"/>
+          <use href="#tuft" x="330" y="560"/>
+          <use href="#tuft" x="560" y="580"/>
+          <use href="#tuft" x="60" y="470"/>
+          <use href="#tuft" x="480" y="570"/>
+          <use href="#tuft" x="160" y="430"/>
+          <use href="#flw" x="150" y="530" fill="#fff"/>
+          <use href="#flw" x="200" y="500" fill="#f2b9c9"/>
+          <use href="#flw" x="560" y="520" fill="#fff"/>
+          <use href="#flw" x="680" y="500" fill="#f2b9c9"/>
+          <use href="#flw" x="360" y="452" fill="#ffe08a"/>
+          <use href="#flw" x="480" y="470" fill="#fff"/>
+          <use href="#flw" x="120" y="470" fill="#fff"/>
+          <use href="#flw" x="620" y="560" fill="#ffe08a"/>
+          <use href="#flw" x="90" y="590" fill="#f2b9c9"/>
+          <use href="#flw" x="740" y="580" fill="#fff"/>
+          <g fill="#e8b23a">
+            <circle cx="150" cy="526.5" r="1.3"/><circle cx="200" cy="496.5" r="1.3"/>
+            <circle cx="560" cy="516.5" r="1.3"/><circle cx="680" cy="496.5" r="1.3"/>
+            <circle cx="360" cy="448.5" r="1.3"/><circle cx="480" cy="466.5" r="1.3"/>
+          </g>
+        </svg>
+      </div>
+
+      <!-- Ambient life -->
+      <div class="amb bfly" style="left:16%;top:58%;animation-duration:8s">
+        <svg viewBox="0 0 20 16">
+          <ellipse cx="6" cy="7" rx="5.5" ry="7" fill="#f2b9c9" transform="rotate(-24 6 7)"/>
+          <ellipse cx="14" cy="7" rx="5.5" ry="7" fill="#e8a5b8" transform="rotate(24 14 7)"/>
+          <rect x="9" y="2" width="2" height="10" rx="1" fill="#5a4632"/>
+        </svg>
+      </div>
+      <div class="amb bfly" style="left:70%;top:64%;animation-duration:12s;animation-delay:-5s">
+        <svg viewBox="0 0 20 16">
+          <ellipse cx="6" cy="7" rx="5.5" ry="7" fill="#ffe08a" transform="rotate(-24 6 7)"/>
+          <ellipse cx="14" cy="7" rx="5.5" ry="7" fill="#f2cf6e" transform="rotate(24 14 7)"/>
+          <rect x="9" y="2" width="2" height="10" rx="1" fill="#5a4632"/>
+        </svg>
+      </div>
+      <div class="amb leaf" style="left:40%;top:36%;animation-duration:13s">
+        <svg viewBox="0 0 12 8">
+          <ellipse cx="6" cy="4" rx="6" ry="3.4" fill="#8fbf5e" transform="rotate(-18 6 4)"/>
+        </svg>
+      </div>
+      <div class="amb leaf" style="left:84%;top:32%;animation-duration:16s;animation-delay:-7s">
+        <svg viewBox="0 0 12 8">
+          <ellipse cx="6" cy="4" rx="6" ry="3.4" fill="#a9cf7e" transform="rotate(14 6 4)"/>
+        </svg>
+      </div>
+
+      <div id="haze"></div>
+      <div id="vig"></div>
     </div>
-    <div class="bird" style="top:10%;animation-duration:61s;animation-delay:-24s">
-      <svg width="18" height="7" viewBox="0 0 26 10"><path d="M1 7 Q7 1 13 7 Q19 1 25 7" fill="none" stroke="#3d5a6b" stroke-width="1.8" stroke-linecap="round" opacity=".5"/></svg>
+
+    <div id="field"></div>
+
+    <!-- The player -->
+    <div id="player">
+      <svg viewBox="0 0 100 130">
+        <rect x="60" y="56" width="26" height="34" rx="10" fill="#c9743c"/>
+        <rect x="64" y="64" width="18" height="12" rx="5" fill="#b06430"/>
+        <path d="M34 60 Q50 50 66 60 L69 98 L31 98 Z" fill="#5a8f5a"/>
+        <path d="M40 62 L46 84 L54 84 L60 62" stroke="#4a7a4a" stroke-width="3" fill="none"/>
+        <circle cx="50" cy="40" r="16" fill="#f2c9a0"/>
+        <ellipse cx="50" cy="31" rx="25" ry="7.5" fill="#d9b56a"/>
+        <path d="M33 31 Q33 12 50 12 Q67 12 67 31 Z" fill="#e3c07a"/>
+        <path d="M33 28 Q50 24 67 28" stroke="#c9a455" stroke-width="2.4" fill="none"/>
+        <circle cx="44" cy="43" r="2.2" fill="#33302a"/>
+        <circle cx="56" cy="43" r="2.2" fill="#33302a"/>
+        <path d="M46 50 Q50 53 54 50" stroke="#a8764f" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <rect x="37" y="96" width="10" height="22" rx="4.5" fill="#6b5a4a"/>
+        <rect x="53" y="96" width="10" height="22" rx="4.5" fill="#6b5a4a"/>
+        <ellipse cx="42" cy="119" rx="9" ry="4.5" fill="#4a3f34"/>
+        <ellipse cx="58" cy="119" rx="9" ry="4.5" fill="#4a3f34"/>
+      </svg>
     </div>
-    <div class="bgl" id="lyFar"><svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
-      <defs><linearGradient id="hazeG" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#dcefe2" stop-opacity="0"/>
-        <stop offset=".5" stop-color="#dcefe2" stop-opacity=".18"/>
-        <stop offset="1" stop-color="#dcefe2" stop-opacity="0"/></linearGradient></defs>
-      <path d="M0 322 L60 252 L130 302 L210 226 L290 296 L370 246 L450 306 L540 236 L620 294 L700 252 L800 312 L800 600 L0 600 Z" fill="#a9c3cf" opacity=".75"/>
-      <path d="M210 226 L224 246 L212 244 L204 250 L196 240 Z" fill="#f2f7f8" opacity=".85"/>
-      <path d="M540 236 L554 256 L542 254 L534 260 L526 250 Z" fill="#f2f7f8" opacity=".8"/>
-      <path d="M60 252 L72 268 L62 266 L52 272 L46 262 Z" fill="#eef4f5" opacity=".7"/>
-      <path d="M700 252 L712 268 L702 266 L692 272 L686 262 Z" fill="#eef4f5" opacity=".7"/>
-      <path d="M0 362 Q90 302 180 338 Q270 374 360 332 Q470 284 560 328 Q660 370 800 320 L800 600 L0 600 Z" fill="#9fc0ac" opacity=".8"/>
-      <path d="M0 362 Q90 302 180 338 Q270 374 360 332 Q470 284 560 328 Q660 370 800 320" fill="none" stroke="#b9d4c0" stroke-width="5" opacity=".55"/>
-      <g fill="#6f9e78" opacity=".7">
-        <circle cx="120" cy="352" r="5"/><circle cx="132" cy="356" r="4"/><circle cx="126" cy="360" r="3.4"/>
-        <circle cx="420" cy="330" r="5"/><circle cx="432" cy="334" r="4"/><circle cx="414" cy="336" r="3.4"/>
-        <circle cx="640" cy="352" r="5"/><circle cx="652" cy="356" r="4"/><circle cx="634" cy="357" r="3.4"/>
-      </g>
-      <path d="M0 394 Q120 350 240 378 Q400 412 520 374 Q660 336 800 386 L800 600 L0 600 Z" fill="#8ab594" opacity=".85"/>
-      <path d="M0 394 Q120 350 240 378 Q400 412 520 374 Q660 336 800 386" fill="none" stroke="#a5ccae" stroke-width="5" opacity=".5"/>
-      <g opacity=".4">
-        <ellipse cx="200" cy="432" rx="60" ry="10" fill="#a8ccb0"/>
-        <ellipse cx="560" cy="440" rx="70" ry="11" fill="#79a888"/>
-        <ellipse cx="740" cy="426" rx="40" ry="8" fill="#a8ccb0"/>
-      </g>
-      <g fill="#6b9772" opacity=".85">
-        <ellipse cx="40" cy="390" rx="22" ry="10"/><ellipse cx="96" cy="396" rx="18" ry="9"/>
-        <ellipse cx="150" cy="388" rx="24" ry="11"/><ellipse cx="240" cy="396" rx="20" ry="9"/>
-        <ellipse cx="332" cy="398" rx="24" ry="11"/><ellipse cx="420" cy="390" rx="22" ry="10"/>
-        <ellipse cx="508" cy="396" rx="20" ry="9"/><ellipse cx="562" cy="392" rx="26" ry="12"/>
-        <ellipse cx="648" cy="396" rx="20" ry="10"/><ellipse cx="702" cy="398" rx="22" ry="10"/>
-        <ellipse cx="762" cy="390" rx="18" ry="9"/>
-      </g>
-      <rect y="300" width="800" height="150" fill="url(#hazeG)"/>
-    </svg></div>
-    <div class="bgl" id="lyMid"><svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
-      <defs><linearGradient id="midH" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#8cba66"/><stop offset="1" stop-color="#79aa58"/></linearGradient></defs>
-      <path d="M0 442 Q140 398 300 430 Q460 460 620 422 Q720 400 800 426 L800 600 L0 600 Z" fill="url(#midH)"/>
-      <g opacity=".45">
-        <ellipse cx="200" cy="472" rx="70" ry="12" fill="#8fc06a"/>
-        <ellipse cx="560" cy="500" rx="90" ry="14" fill="#6f9e4e"/>
-        <ellipse cx="740" cy="470" rx="50" ry="10" fill="#8fc06a"/>
-      </g>
-      <g transform="translate(110 424)"><rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/><circle cx="0" cy="-40" r="22" fill="#4e7a44"/><circle cx="-15" cy="-29" r="14" fill="#5d8f4f"/><circle cx="14" cy="-30" r="13" fill="#456f3c"/></g>
-      <g transform="translate(268 436) scale(.85)"><rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/><circle cx="0" cy="-40" r="20" fill="#5d8f4f"/><circle cx="13" cy="-29" r="12" fill="#4e7a44"/></g>
-      <g transform="translate(190 452) scale(.66)"><rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/><circle cx="0" cy="-40" r="21" fill="#5d8f4f"/><circle cx="-13" cy="-30" r="13" fill="#4e7a44"/></g>
-      <g transform="translate(360 462) scale(.6)"><rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/><circle cx="0" cy="-40" r="20" fill="#456f3c"/><circle cx="12" cy="-30" r="12" fill="#5d8f4f"/></g>
-      <g transform="translate(472 440) scale(.78)"><rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/><circle cx="0" cy="-40" r="21" fill="#456f3c"/><circle cx="-14" cy="-30" r="13" fill="#5d8f4f"/></g>
-      <g transform="translate(560 452) scale(.66)"><rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/><circle cx="0" cy="-40" r="21" fill="#4e7a44"/><circle cx="13" cy="-30" r="12" fill="#5d8f4f"/></g>
-      <g transform="translate(664 416) scale(.9)"><rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/><circle cx="0" cy="-40" r="23" fill="#4e7a44"/><circle cx="15" cy="-29" r="14" fill="#5d8f4f"/><circle cx="-13" cy="-31" r="12" fill="#456f3c"/></g>
-      <g transform="translate(744 446) scale(.7)"><rect x="-4" y="-26" width="8" height="28" rx="3" fill="#6d4f33"/><circle cx="0" cy="-40" r="20" fill="#5d8f4f"/><circle cx="-12" cy="-30" r="12" fill="#456f3c"/></g>
-      <g fill="#5d8f4f">
-        <ellipse cx="60" cy="470" rx="16" ry="9"/><ellipse cx="86" cy="476" rx="12" ry="7"/>
-        <ellipse cx="440" cy="478" rx="14" ry="8"/><ellipse cx="620" cy="470" rx="15" ry="8"/>
-        <ellipse cx="320" cy="490" rx="13" ry="7"/>
-      </g>
-    </svg></div>
-    <div class="bgl" id="lyNear"><svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
-      <defs>
-        <linearGradient id="grG" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#85b563"/><stop offset=".55" stop-color="#74a854"/><stop offset="1" stop-color="#5f9443"/>
-        </linearGradient>
-        <linearGradient id="pathG" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#ecdca8"/><stop offset="1" stop-color="#d3bd85"/>
-        </linearGradient>
-        <radialGradient id="pondG" cx=".42" cy=".35" r=".75">
-          <stop offset="0" stop-color="#a8ddf0"/><stop offset=".65" stop-color="#6db5d6"/><stop offset="1" stop-color="#549cc2"/>
-        </radialGradient>
-        <g id="tuft"><g stroke="#4e8a3c" stroke-width="2" stroke-linecap="round" fill="none">
-          <path d="M0 0 Q-3 -8 -6 -12"/><path d="M0 0 Q0 -10 1 -14"/><path d="M0 0 Q4 -8 7 -11"/></g></g>
-        <g id="flw"><circle cx="0" cy="-3.4" r="2"/><circle cx="3.2" cy="-1.1" r="2"/><circle cx="2" cy="2.8" r="2"/><circle cx="-2" cy="2.8" r="2"/><circle cx="-3.2" cy="-1.1" r="2"/></g>
-      </defs>
-      <path d="M0 454 Q60 436 124 448 Q200 462 276 446 Q356 430 436 450 Q516 468 596 448 Q686 428 800 452 L800 600 L0 600 Z" fill="url(#grG)"/>
-      <g opacity=".5">
-        <ellipse cx="120" cy="482" rx="88" ry="15" fill="#82b760"/>
-        <ellipse cx="648" cy="540" rx="118" ry="19" fill="#699e4c"/>
-        <ellipse cx="420" cy="580" rx="90" ry="14" fill="#79ad58"/>
-        <ellipse cx="60" cy="566" rx="70" ry="12" fill="#6da04f"/>
-        <ellipse cx="520" cy="472" rx="60" ry="10" fill="#86bd64"/>
-      </g>
-      <path d="M282 600 Q368 470 384 352 Q390 318 394 300 L428 300 Q424 330 446 420 Q474 522 524 600 Z" fill="url(#pathG)"/>
-      <path d="M394 300 Q390 318 384 352 Q368 470 282 600 L296 600 Q380 472 396 354 Q401 322 405 300 Z" fill="#f2e6bc" opacity=".45"/>
-      <g stroke="#c4ad78" stroke-width="3" stroke-linecap="round" fill="none" opacity=".6">
-        <path d="M386 460 Q384 500 376 540"/><path d="M440 470 Q446 510 456 548"/>
-      </g>
-      <g fill="#c2ab77" opacity=".8">
-        <ellipse cx="372" cy="470" rx="6" ry="3.4"/><ellipse cx="470" cy="500" rx="7" ry="4"/>
-        <ellipse cx="404" cy="560" rx="6" ry="3.4"/><ellipse cx="350" cy="540" rx="5" ry="3"/>
-      </g>
-      <ellipse cx="295" cy="520" rx="88" ry="31" fill="#568544"/>
-      <ellipse cx="295" cy="516" rx="80" ry="27" fill="url(#pondG)"/>
-      <ellipse cx="272" cy="508" rx="32" ry="9" fill="#d4effa" opacity=".75"/>
-      <ellipse cx="326" cy="526" rx="15" ry="5" fill="#bfe6f2" opacity=".55"/>
-      <g fill="none" stroke="#eaf7fc" stroke-width="1.6" opacity=".6">
-        <path d="M250 528 Q262 533 276 530"/><path d="M306 534 Q318 538 330 534"/>
-      </g>
-      <ellipse cx="338" cy="512" rx="9" ry="4.4" fill="#4e8a3f"/><circle cx="338" cy="510.6" r="1.8" fill="#f6cde0"/>
-      <g stroke="#3e6d33" stroke-width="2.4" stroke-linecap="round" fill="none">
-        <path d="M232 500 Q228 486 233 476"/><path d="M241 502 Q243 486 239 476"/><path d="M225 502 Q222 490 224 482"/>
-      </g>
-      <ellipse cx="233" cy="474" rx="2.6" ry="6" fill="#7a4e2a"/>
-      <g fill="#3f7a30" opacity=".85">
-        <circle cx="540" cy="470" r="2.2"/><circle cx="546" cy="474" r="2.2"/><circle cx="535" cy="475" r="2.2"/>
-        <circle cx="140" cy="500" r="2.2"/><circle cx="146" cy="504" r="2.2"/><circle cx="135" cy="505" r="2.2"/>
-      </g>
-      <g transform="translate(88 470)">
-        <ellipse cx="2" cy="58" rx="44" ry="10" fill="#3f6a30" opacity=".3"/>
-        <path d="M-8 60 L-4 -8 L5 -8 L8 60 Z" fill="#7a5a38"/>
-        <path d="M-6 22 L-22 -4 M6 32 L20 6" stroke="#7a5a38" stroke-width="5" stroke-linecap="round"/>
-        <circle cx="0" cy="-40" r="38" fill="#4e7a44"/><circle cx="-26" cy="-22" r="24" fill="#5d8f4f"/>
-        <circle cx="25" cy="-24" r="22" fill="#456f3c"/><circle cx="-6" cy="-54" r="17" fill="#69a355"/>
-        <circle cx="16" cy="-14" r="3" fill="#c9e2a8" opacity=".8"/><circle cx="-18" cy="-30" r="2.6" fill="#c9e2a8" opacity=".7"/>
-      </g>
-      <g transform="translate(716 462) scale(.92)">
-        <ellipse cx="2" cy="60" rx="42" ry="10" fill="#3f6a30" opacity=".3"/>
-        <path d="M-8 60 L-4 -8 L5 -8 L8 60 Z" fill="#82613f"/>
-        <circle cx="0" cy="-38" r="36" fill="#5d8f4f"/><circle cx="-25" cy="-20" r="22" fill="#4e7a44"/>
-        <circle cx="24" cy="-22" r="21" fill="#69a355"/><circle cx="-4" cy="-52" r="15" fill="#7fb563"/>
-        <circle cx="-14" cy="-16" r="2.6" fill="#d4ecb2" opacity=".8"/>
-      </g>
-      <g fill="#9a9a90">
-        <path d="M608 560 Q614 548 628 550 Q642 552 640 562 Q638 570 624 570 Q610 570 608 560 Z"/>
-        <path d="M588 566 Q592 560 600 561 Q607 563 605 569 Q603 573 596 572 Q590 571 588 566 Z" fill="#a8a89e"/>
-      </g>
-      <use href="#tuft" x="180" y="452"/><use href="#tuft" x="520" y="446"/><use href="#tuft" x="620" y="480"/>
-      <use href="#tuft" x="80" y="560"/><use href="#tuft" x="220" y="576"/><use href="#tuft" x="420" y="440"/>
-      <use href="#tuft" x="700" y="540"/><use href="#tuft" x="760" y="470"/><use href="#tuft" x="320" y="470"/>
-      <use href="#flw" x="150" y="530" fill="#fff"/><use href="#flw" x="200" y="500" fill="#f2b9c9"/>
-      <use href="#flw" x="560" y="520" fill="#fff"/><use href="#flw" x="680" y="500" fill="#f2b9c9"/>
-      <use href="#flw" x="360" y="452" fill="#ffe08a"/><use href="#flw" x="480" y="470" fill="#fff"/>
-      <g fill="#e8b23a"><circle cx="150" cy="526.5" r="1.3"/><circle cx="200" cy="496.5" r="1.3"/><circle cx="560" cy="516.5" r="1.3"/><circle cx="680" cy="496.5" r="1.3"/><circle cx="360" cy="448.5" r="1.3"/><circle cx="480" cy="466.5" r="1.3"/></g>
-      <use href="#tuft" x="330" y="560"/><use href="#tuft" x="560" y="580"/><use href="#tuft" x="60" y="470"/>
-      <use href="#tuft" x="480" y="570"/><use href="#tuft" x="160" y="430"/>
-      <use href="#flw" x="120" y="470" fill="#fff"/><use href="#flw" x="620" y="560" fill="#ffe08a"/>
-      <use href="#flw" x="90" y="590" fill="#f2b9c9"/><use href="#flw" x="740" y="580" fill="#fff"/>
-    </svg></div>
-    <div class="amb bfly" style="left:16%;top:58%;animation-duration:8s">
-      <svg viewBox="0 0 20 16"><ellipse cx="6" cy="7" rx="5.5" ry="7" fill="#f2b9c9" transform="rotate(-24 6 7)"/><ellipse cx="14" cy="7" rx="5.5" ry="7" fill="#e8a5b8" transform="rotate(24 14 7)"/><rect x="9" y="2" width="2" height="10" rx="1" fill="#5a4632"/></svg>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div class="chip" id="hudTitle">
+        WANDERGROVE
+        <small>journal <b id="jCount">0</b>/10 species</small>
+      </div>
+      <div id="hudBtns">
+        <button id="btnGuide">How to</button>
+      </div>
     </div>
-    <div class="amb bfly" style="left:70%;top:64%;animation-duration:12s;animation-delay:-5s">
-      <svg viewBox="0 0 20 16"><ellipse cx="6" cy="7" rx="5.5" ry="7" fill="#ffe08a" transform="rotate(-24 6 7)"/><ellipse cx="14" cy="7" rx="5.5" ry="7" fill="#f2cf6e" transform="rotate(24 14 7)"/><rect x="9" y="2" width="2" height="10" rx="1" fill="#5a4632"/></svg>
+
+    <div id="mapHint">Tap a critter to walk up to it</div>
+
+    <button id="btnJournal" title="Journal">
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <path d="M12 5.6C10.2 4.4 7.6 4.2 5.4 5c-.5.2-.9.6-.9 1.2v11.2c0 .8.8 1.3 1.6 1.1 1.9-.5 4-.3 5.9.8V5.6Z" fill="#7fae5c"/>
+        <path d="M12 5.6c1.8-1.2 4.4-1.4 6.6-.6.5.2.9.6.9 1.2v11.2c0 .8-.8 1.3-1.6 1.1-1.9-.5-4-.3-5.9.8V5.6Z" fill="#9cc773"/>
+        <path d="M12 5.6v13.7" stroke="#5c8a40" stroke-width="1.2"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- ==================== ENCOUNTER ==================== -->
+  <div id="enc">
+    <div id="encBg">
+      <div class="bgl" id="eSky">
+        <svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
+          <defs>
+            <linearGradient id="eSkyG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#8fc6e8"/>
+              <stop offset=".55" stop-color="#c2e4f0"/>
+              <stop offset="1" stop-color="#e6f3da"/>
+            </linearGradient>
+          </defs>
+          <rect width="800" height="600" fill="url(#eSkyG)"/>
+          <circle cx="150" cy="84" r="86" fill="#fff7d8" opacity=".5"/>
+          <circle cx="150" cy="84" r="27" fill="#fffdf0" opacity=".9"/>
+          <g fill="#fff" opacity=".7">
+            <ellipse cx="560" cy="96" rx="46" ry="13"/>
+            <ellipse cx="598" cy="86" rx="28" ry="10"/>
+          </g>
+          <g fill="#fff" opacity=".5">
+            <ellipse cx="360" cy="46" rx="34" ry="9"/>
+          </g>
+        </svg>
+      </div>
+      <div class="bgl" id="eFar">
+        <svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
+          <path d="M0 332 L90 264 L170 314 L260 242 L350 308 L430 260 L520 314 L610 252 L700 302 L800 264 L800 600 L0 600 Z" fill="#a3c2ae" opacity=".75"/>
+          <path d="M0 374 Q120 322 240 354 Q380 390 500 346 Q640 302 800 358 L800 600 L0 600 Z" fill="#8cba94" opacity=".8"/>
+          <path d="M0 374 Q120 322 240 354 Q380 390 500 346 Q640 302 800 358" fill="none" stroke="#a9cfb4" stroke-width="5" opacity=".5"/>
+          <g fill="#6b9772" opacity=".8">
+            <ellipse cx="60" cy="368" rx="24" ry="11"/>
+            <ellipse cx="182" cy="374" rx="20" ry="10"/>
+            <ellipse cx="422" cy="370" rx="26" ry="12"/>
+            <ellipse cx="642" cy="368" rx="22" ry="10"/>
+            <ellipse cx="762" cy="376" rx="20" ry="9"/>
+          </g>
+          <rect y="320" width="800" height="110" fill="#dcefe2" opacity=".14"/>
+        </svg>
+      </div>
+      <div class="bgl" id="eGround">
+        <svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
+          <defs>
+            <linearGradient id="eGrG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#6ba44d"/>
+              <stop offset=".4" stop-color="#5f9443"/>
+              <stop offset="1" stop-color="#45762e"/>
+            </linearGradient>
+            <g id="eTuft">
+              <g stroke="#457a32" stroke-width="2" stroke-linecap="round" fill="none">
+                <path d="M0 0 Q-3 -8 -6 -12"/>
+                <path d="M0 0 Q0 -10 1 -14"/>
+                <path d="M0 0 Q4 -8 7 -11"/>
+              </g>
+            </g>
+          </defs>
+          <rect y="366" width="800" height="234" fill="url(#eGrG)"/>
+          <rect y="366" width="800" height="5" fill="#ffffff" opacity=".28"/>
+          <rect y="371" width="800" height="12" fill="#7cb45c" opacity=".45"/>
+          <use href="#eTuft" x="70" y="420"/>
+          <use href="#eTuft" x="180" y="400"/>
+          <use href="#eTuft" x="300" y="432"/>
+          <use href="#eTuft" x="520" y="404"/>
+          <use href="#eTuft" x="640" y="424"/>
+          <use href="#eTuft" x="750" y="398"/>
+          <use href="#eTuft" x="120" y="560"/>
+          <use href="#eTuft" x="380" y="580"/>
+          <use href="#eTuft" x="700" y="556"/>
+          <g fill="#fff" opacity=".8">
+            <circle cx="240" cy="416" r="2"/>
+            <circle cx="580" cy="410" r="2"/>
+            <circle cx="460" cy="418" r="2"/>
+          </g>
+          <g fill="#f2b9c9" opacity=".8">
+            <circle cx="320" cy="408" r="2"/>
+            <circle cx="660" cy="440" r="2"/>
+          </g>
+        </svg>
+      </div>
     </div>
-    <div class="amb leaf" style="left:40%;top:36%;animation-duration:13s">
-      <svg viewBox="0 0 12 8"><ellipse cx="6" cy="4" rx="6" ry="3.4" fill="#8fbf5e" transform="rotate(-18 6 4)"/></svg>
+
+    <div id="encCrit">
+      <div id="encCritIn">
+        <div class="chopt" id="encHop">
+          <div class="cwrap" id="encWrap"></div>
+        </div>
+        <div class="cshadow"></div>
+      </div>
     </div>
-    <div class="amb leaf" style="left:84%;top:32%;animation-duration:16s;animation-delay:-7s">
-      <svg viewBox="0 0 12 8"><ellipse cx="6" cy="4" rx="6" ry="3.4" fill="#a9cf7e" transform="rotate(14 6 4)"/></svg>
+
+    <div id="ring"></div>
+    <div id="ribbon"></div>
+
+    <div id="encPlate">
+      <button id="btnBack">←&nbsp; Back to park</button>
     </div>
-    <div id="haze"></div>
-    <div id="vig"></div>
+
+    <div id="encLabel">
+      <div id="encNameCard">
+        <div id="encName">—</div>
+        <div id="encTag">—</div>
+      </div>
+      <div id="encPowCard">
+        <div id="encPow"><small>POWER</small><span id="encPowN">0</span></div>
+      </div>
+    </div>
+
+    <div id="pad"></div>
+    <div id="trayHint">Press down here &amp; flick to toss</div>
+    <div id="trayLabel">GLOWSEEDS &infin;</div>
+
+    <div id="flyShadow"></div>
+    <div id="ball"><div id="ballIn"></div></div>
+    <div id="stamp"></div>
+    <canvas id="fx"></canvas>
   </div>
-  <div id="field"></div>
-  <div id="player">
-    <svg viewBox="0 0 100 130">
-      <rect x="60" y="56" width="26" height="34" rx="10" fill="#c9743c"/>
-      <rect x="64" y="64" width="18" height="12" rx="5" fill="#b06430"/>
-      <path d="M34 60 Q50 50 66 60 L69 98 L31 98 Z" fill="#5a8f5a"/>
-      <path d="M40 62 L46 84 L54 84 L60 62" stroke="#4a7a4a" stroke-width="3" fill="none"/>
-      <circle cx="50" cy="40" r="16" fill="#f2c9a0"/>
-      <ellipse cx="50" cy="31" rx="25" ry="7.5" fill="#d9b56a"/>
-      <path d="M33 31 Q33 12 50 12 Q67 12 67 31 Z" fill="#e3c07a"/>
-      <path d="M33 28 Q50 24 67 28" stroke="#c9a455" stroke-width="2.4" fill="none"/>
-      <circle cx="44" cy="43" r="2.2" fill="#33302a"/><circle cx="56" cy="43" r="2.2" fill="#33302a"/>
-      <path d="M46 50 Q50 53 54 50" stroke="#a8764f" stroke-width="2" fill="none" stroke-linecap="round"/>
-      <rect x="37" y="96" width="10" height="22" rx="4.5" fill="#6b5a4a"/>
-      <rect x="53" y="96" width="10" height="22" rx="4.5" fill="#6b5a4a"/>
-      <ellipse cx="42" cy="119" rx="9" ry="4.5" fill="#4a3f34"/><ellipse cx="58" cy="119" rx="9" ry="4.5" fill="#4a3f34"/>
-    </svg>
+
+  <!-- ==================== SHEETS ==================== -->
+  <div id="sheetBack"></div>
+  <div id="sheet">
+    <div id="sheetHead">
+      <div id="sheetTitle">Journal</div>
+      <button id="sheetClose">Close</button>
+    </div>
+    <div id="sheetBody"></div>
   </div>
-  <div id="hud">
-    <div class="chip" id="hudTitle">WANDERGROVE<small>journal <b id="jCount">0</b>/10 species</small></div>
-    <div id="hudBtns"><button id="btnGuide">How to</button></div>
+
+  <!-- ==================== INTRO ==================== -->
+  <div id="intro">
+    <div id="introLogo">WANDERGROVE</div>
+    <div id="introSub">A quiet park. Curious critters. One trusty Glowseed.</div>
+    <div id="introSteps">
+      <div class="gline">
+        <div class="gnum">1</div>
+        <div class="gtxt">Tap any critter you spot in the park.</div>
+      </div>
+      <div class="gline">
+        <div class="gnum">2</div>
+        <div class="gtxt">Press the lower half and flick to toss — the Glowseed flies exactly where you flick it, like a real throw.</div>
+      </div>
+      <div class="gline">
+        <div class="gnum">3</div>
+        <div class="gtxt">Hit inside the shrinking ring for a bonus. Higher POWER critters resist more.</div>
+      </div>
+    </div>
+    <button id="btnStart">Start strolling</button>
   </div>
-  <div id="mapHint">Tap a critter to walk up to it</div>
-  <button id="btnJournal" title="Journal"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 5.6C10.2 4.4 7.6 4.2 5.4 5c-.5.2-.9.6-.9 1.2v11.2c0 .8.8 1.3 1.6 1.1 1.9-.5 4-.3 5.9.8V5.6Z" fill="#7fae5c"/><path d="M12 5.6c1.8-1.2 4.4-1.4 6.6-.6.5.2.9.6.9 1.2v11.2c0 .8-.8 1.3-1.6 1.1-1.9-.5-4-.3-5.9.8V5.6Z" fill="#9cc773"/><path d="M12 5.6v13.7" stroke="#5c8a40" stroke-width="1.2"/></svg></button>
-</div>
 
-<!-- ==================== ENCOUNTER ==================== -->
-<div id="enc">
-  <div id="encBg">
-    <div class="bgl" id="eSky"><svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
-      <defs><linearGradient id="eSkyG" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#8fc6e8"/><stop offset=".55" stop-color="#c2e4f0"/><stop offset="1" stop-color="#e6f3da"/>
-      </linearGradient></defs>
-      <rect width="800" height="600" fill="url(#eSkyG)"/>
-      <circle cx="150" cy="84" r="86" fill="#fff7d8" opacity=".5"/>
-      <circle cx="150" cy="84" r="27" fill="#fffdf0" opacity=".9"/>
-      <g fill="#fff" opacity=".7"><ellipse cx="560" cy="96" rx="46" ry="13"/><ellipse cx="598" cy="86" rx="28" ry="10"/></g>
-      <g fill="#fff" opacity=".5"><ellipse cx="360" cy="46" rx="34" ry="9"/></g>
-    </svg></div>
-    <div class="bgl" id="eFar"><svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
-      <path d="M0 332 L90 264 L170 314 L260 242 L350 308 L430 260 L520 314 L610 252 L700 302 L800 264 L800 600 L0 600 Z" fill="#a3c2ae" opacity=".75"/>
-      <path d="M0 374 Q120 322 240 354 Q380 390 500 346 Q640 302 800 358 L800 600 L0 600 Z" fill="#8cba94" opacity=".8"/>
-      <path d="M0 374 Q120 322 240 354 Q380 390 500 346 Q640 302 800 358" fill="none" stroke="#a9cfb4" stroke-width="5" opacity=".5"/>
-      <g fill="#6b9772" opacity=".8">
-        <ellipse cx="60" cy="368" rx="24" ry="11"/><ellipse cx="182" cy="374" rx="20" ry="10"/>
-        <ellipse cx="422" cy="370" rx="26" ry="12"/><ellipse cx="642" cy="368" rx="22" ry="10"/><ellipse cx="762" cy="376" rx="20" ry="9"/>
-      </g>
-      <rect y="320" width="800" height="110" fill="#dcefe2" opacity=".14"/>
-    </svg></div>
-    <div class="bgl" id="eGround"><svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMax slice">
-      <defs>
-        <linearGradient id="eGrG" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#6ba44d"/><stop offset=".4" stop-color="#5f9443"/><stop offset="1" stop-color="#45762e"/>
-        </linearGradient>
-        <g id="eTuft"><g stroke="#457a32" stroke-width="2" stroke-linecap="round" fill="none">
-          <path d="M0 0 Q-3 -8 -6 -12"/><path d="M0 0 Q0 -10 1 -14"/><path d="M0 0 Q4 -8 7 -11"/></g></g>
-      </defs>
-      <rect y="366" width="800" height="234" fill="url(#eGrG)"/>
-      <rect y="366" width="800" height="5" fill="#ffffff" opacity=".28"/>
-      <rect y="371" width="800" height="12" fill="#7cb45c" opacity=".45"/>
-      <use href="#eTuft" x="70" y="420"/><use href="#eTuft" x="180" y="400"/><use href="#eTuft" x="300" y="432"/>
-      <use href="#eTuft" x="520" y="404"/><use href="#eTuft" x="640" y="424"/><use href="#eTuft" x="750" y="398"/>
-      <use href="#eTuft" x="120" y="560"/><use href="#eTuft" x="380" y="580"/><use href="#eTuft" x="700" y="556"/>
-      <g fill="#fff" opacity=".8"><circle cx="240" cy="416" r="2"/><circle cx="580" cy="410" r="2"/><circle cx="460" cy="418" r="2"/></g>
-      <g fill="#f2b9c9" opacity=".8"><circle cx="320" cy="408" r="2"/><circle cx="660" cy="440" r="2"/></g>
-    </svg></div>
-  </div>
-  <div id="encCrit"><div id="encCritIn"><div class="chopt" id="encHop"><div class="cwrap" id="encWrap"></div></div><div class="cshadow"></div></div></div>
-  <div id="ring"></div>
-  <div id="ribbon"></div>
-  <div id="encPlate">
-    <button id="btnBack">←&nbsp; Back to park</button>
-  </div>
-  <div id="encLabel">
-    <div id="encNameCard"><div id="encName">—</div><div id="encTag">—</div></div>
-    <div id="encPowCard"><div id="encPow"><small>POWER</small><span id="encPowN">0</span></div></div>
-  </div>
-  <div id="pad"></div>
-  <div id="trayHint">Press down here &amp; flick to toss</div>
-  <div id="trayLabel">GLOWSEEDS &infin;</div>
-  <div id="flyShadow"></div>
-  <div id="ball"><div id="ballIn"></div></div>
-  <div id="stamp"></div>
-  <canvas id="fx"></canvas>
-</div>
+  <script>
+    'use strict';
 
-<!-- ==================== SHEETS ==================== -->
-<div id="sheetBack"></div>
-<div id="sheet">
-  <div id="sheetHead"><div id="sheetTitle">Journal</div><button id="sheetClose">Close</button></div>
-  <div id="sheetBody"></div>
-</div>
+    /* ============================================================
+       6. HELPERS & ELEMENT REFS
+       ============================================================ */
+    const $ = s => document.querySelector(s);
+    const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+    const rand = (a, b) => a + Math.random() * (b - a);
+    const TAU = Math.PI * 2;
 
-<!-- ==================== INTRO ==================== -->
-<div id="intro">
-  <div id="introLogo">WANDERGROVE</div>
-  <div id="introSub">A quiet park. Curious critters. One trusty Glowseed.</div>
-  <div id="introSteps">
-    <div class="gline"><div class="gnum">1</div><div class="gtxt">Tap any critter you spot in the park.</div></div>
-    <div class="gline"><div class="gnum">2</div><div class="gtxt">Press the lower half and flick to toss — the Glowseed flies exactly where you flick it, like a real throw.</div></div>
-    <div class="gline"><div class="gnum">3</div><div class="gtxt">Hit inside the shrinking ring for a bonus. Higher POWER critters resist more.</div></div>
-  </div>
-  <button id="btnStart">Start strolling</button>
-</div>
-<script>
-'use strict';
-/* ---------------- helpers ---------------- */
-const $=s=>document.querySelector(s);
-const clamp=(v,a,b)=>v<a?a:v>b?b:v;
-const rand=(a,b)=>a+Math.random()*(b-a);
-const TAU=Math.PI*2;
-const enc=$('#enc'),fieldEl=$('#field'),ballEl=$('#ball'),ballIn=$('#ballIn'),ringEl=$('#ring'),
-      ribbonEl=$('#ribbon'),stampEl=$('#stamp'),fxC=$('#fx'),encCritIn=$('#encCritIn'),
-      encWrap=$('#encWrap'),encHop=$('#encHop'),flyShadowEl=$('#flyShadow'),playerEl=$('#player');
-window.__errors=[];window.addEventListener('error',e=>window.__errors.push(String(e.message)));
+    const enc = $('#enc');
+    const fieldEl = $('#field');
+    const ballEl = $('#ball');
+    const ballIn = $('#ballIn');
+    const ringEl = $('#ring');
+    const ribbonEl = $('#ribbon');
+    const stampEl = $('#stamp');
+    const fxC = $('#fx');
+    const encCritIn = $('#encCritIn');
+    const encWrap = $('#encWrap');
+    const encHop = $('#encHop');
+    const flyShadowEl = $('#flyShadow');
+    const playerEl = $('#player');
 
-/* ---------------- parallax ---------------- */
-const lySky=$('#lySky'),lyFar=$('#lyFar'),lyMid=$('#lyMid'),lyNear=$('#lyNear'),
-      eFar=$('#eFar'),eGround=$('#eGround');
-let pxT={x:0,y:0},pxC={x:0,y:0};
-window.addEventListener('pointermove',e=>{
-  pxT.x=(e.clientX/innerWidth-.5)*2;pxT.y=(e.clientY/innerHeight-.5)*2});
-function updParallax(dt){const k=1-Math.exp(-dt*3.5);
-  pxC.x+=(pxT.x-pxC.x)*k;pxC.y+=(pxT.y-pxC.y)*k;
-  if(lySky)lySky.style.transform='translate3d('+(-pxC.x*7).toFixed(1)+'px,'+(-pxC.y*3).toFixed(1)+'px,0)';
-  if(lyFar)lyFar.style.transform='translate3d('+(-pxC.x*16).toFixed(1)+'px,'+(-pxC.y*7).toFixed(1)+'px,0)';
-  if(lyMid)lyMid.style.transform='translate3d('+(-pxC.x*28).toFixed(1)+'px,'+(-pxC.y*12).toFixed(1)+'px,0)';
-  if(lyNear)lyNear.style.transform='translate3d('+(-pxC.x*42).toFixed(1)+'px,'+(-pxC.y*18).toFixed(1)+'px,0)';
-  if(eFar)eFar.style.transform='translate3d('+(-pxC.x*9).toFixed(1)+'px,0,0)';
-  if(eGround)eGround.style.transform='translate3d('+(-pxC.x*16).toFixed(1)+'px,0,0)';
-  if(playerEl){const off=-pxC.x*42;
-    playerEl.style.transform='translate3d(calc(-50% '+(off<0?'- ':'+ ')+Math.abs(off).toFixed(1)+'px),0,0)'}}
-let playerPx=null;
-function playerWalkTo(x){const w=innerWidth,tx=clamp(x,w*.14,w*.86),
-  cur=playerPx==null?w*.504:playerPx;
-  playerEl.style.transitionDuration=clamp(Math.abs(tx-cur)/130,1,3).toFixed(1)+'s';
-  playerEl.style.left=tx+'px';playerPx=tx;
-  const dir=tx<cur?-1:1;
-  playerEl.querySelector('svg').style.transform='scaleX('+dir+') rotate('+(dir*3)+'deg)';
-  clearTimeout(playerWalkTo._t);
-  playerWalkTo._t=setTimeout(()=>{playerEl.querySelector('svg').style.transform=''},2600)}
+    // Runtime error capture — the smoke tests assert this stays empty.
+    window.__errors = [];
+    window.addEventListener('error', e => window.__errors.push(String(e.message)));
 
-/* ---------------- audio ---------------- */
-let AC=null;
-function ac(){if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)()}catch(e){}}
-  if(AC&&AC.state==='suspended')AC.resume();return AC}
-function tone(f,d,type,v,slide){if(!ac())return;type=type||'sine';v=v==null?.16:v;
-  const o=AC.createOscillator(),g=AC.createGain(),t=AC.currentTime;
-  o.type=type;o.frequency.setValueAtTime(f,t);
-  if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(40,f+slide),t+d);
-  g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(.0001,t+d);
-  o.connect(g).connect(AC.destination);o.start(t);o.stop(t+d)}
-function whoosh(){if(!ac())return;const dur=.22,buf=AC.createBuffer(1,AC.sampleRate*dur|0,AC.sampleRate),d=buf.getChannelData(0);
-  for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*(1-i/d.length);
-  const s=AC.createBufferSource();s.buffer=buf;const f=AC.createBiquadFilter();f.type='bandpass';f.Q.value=1.1;
-  f.frequency.setValueAtTime(500,AC.currentTime);f.frequency.exponentialRampToValueAtTime(2600,AC.currentTime+dur);
-  const g=AC.createGain();g.gain.value=.22;s.connect(f).connect(g).connect(AC.destination);s.start()}
-function cry(name){let h=0;for(const c of name)h=(h*31+c.charCodeAt(0))>>>0;
-  const base=300+(h%340),iv=[0,4,7,12,5,9,2,7];
-  for(let i=0;i<3;i++){const st=iv[(h>>(i*3))&7];
-    setTimeout(()=>tone(base*Math.pow(2,st/12),.1,i%2?'triangle':'square',.11),i*95)}}
-function chime(){[523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,.24,'sine',.16),i*95))}
-function tickS(){tone(210,.06,'square',.12)}
-function popS(){tone(150,.14,'square',.26,-80);tone(90,.18,'sine',.2,-30)}
-function sadS(){tone(320,.22,'sawtooth',.1,-140)}
+    /* ============================================================
+       7a. PARALLAX
 
-/* ---------------- species ---------------- */
-const SPECIES=[
-{id:'woolby',name:'Woolby',tag:'Fluff',base:58,spread:34,diff:1,size:1.05,move:'hopper',anim:'anim-bounce',w:5,
- svg:'<svg viewBox="0 0 120 120"><rect x="42" y="90" width="10" height="16" rx="5" fill="#c9a97e"/><rect x="68" y="90" width="10" height="16" rx="5" fill="#c9a97e"/><circle cx="60" cy="66" r="30" fill="#f4ead7"/><circle cx="34" cy="70" r="16" fill="#f4ead7"/><circle cx="86" cy="70" r="16" fill="#f4ead7"/><circle cx="46" cy="44" r="17" fill="#f4ead7"/><circle cx="74" cy="44" r="17" fill="#f4ead7"/><ellipse cx="60" cy="72" rx="19" ry="15" fill="#e7d2ae"/><ellipse cx="36" cy="42" rx="6" ry="10" fill="#c9a97e" transform="rotate(-24 36 42)"/><ellipse cx="84" cy="42" rx="6" ry="10" fill="#c9a97e" transform="rotate(24 84 42)"/><circle cx="52" cy="68" r="2.7" fill="#3a3128"/><circle cx="68" cy="68" r="2.7" fill="#3a3128"/><path d="M55 77 Q60 81 65 77" stroke="#3a3128" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>'},
-{id:'pecklet',name:'Pecklet',tag:'Chirp',base:46,spread:30,diff:1,size:.8,move:'hopper',anim:'anim-flutter',w:5,
- svg:'<svg viewBox="0 0 120 120"><path d="M86 62 L110 50 L104 64 L112 72 L88 72 Z" fill="#5aa7c9"/><path d="M50 92 L50 106 M66 92 L66 106" stroke="#f2a54a" stroke-width="4.4" stroke-linecap="round"/><circle cx="58" cy="64" r="30" fill="#8ecfe8"/><ellipse cx="52" cy="76" rx="16" ry="13" fill="#eaf6fb"/><path class="wing" d="M68 56 Q94 50 94 70 Q82 84 64 74 Z" fill="#5aa7c9"/><path d="M52 36 Q54 18 68 20 Q60 26 62 38 Z" fill="#f2a54a"/><path d="M30 60 L10 66 L30 72 Z" fill="#f2a54a"/><circle cx="40" cy="56" r="4.6" fill="#22282e"/><circle cx="41.8" cy="54.2" r="1.6" fill="#fff"/></svg>'},
-{id:'sproutle',name:'Sproutle',tag:'Sprout',base:70,spread:38,diff:2,size:1,move:'walker',anim:'anim-sway',w:4,
- svg:'<svg viewBox="0 0 120 120"><ellipse cx="36" cy="100" rx="11" ry="7" fill="#7fae5c"/><ellipse cx="82" cy="100" rx="11" ry="7" fill="#7fae5c"/><circle cx="27" cy="72" r="15" fill="#a9cf7e"/><circle cx="22" cy="68" r="2.8" fill="#2f3a24"/><path d="M19 78 Q24 81 29 78" stroke="#2f3a24" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M30 98 Q28 48 72 48 Q104 48 104 98 Z" fill="#6f9e4e"/><circle cx="58" cy="74" r="9" fill="#8fbe6b"/><circle cx="82" cy="66" r="7" fill="#8fbe6b"/><circle cx="86" cy="86" r="6" fill="#8fbe6b"/><path d="M64 48 Q64 30 52 26 M64 42 Q74 32 80 36" stroke="#4e7a34" stroke-width="4" fill="none" stroke-linecap="round"/><ellipse cx="50" cy="24" rx="9" ry="5" fill="#69a344" transform="rotate(-22 50 24)"/></svg>'},
-{id:'puddlin',name:'Puddlin',tag:'Dewdrop',base:64,spread:36,diff:2,size:.92,move:'slide',anim:'anim-jelly',w:4,
- svg:'<svg viewBox="0 0 120 120"><path d="M60 20 Q78 46 88 62 Q99 81 88 95 Q76 108 60 108 Q44 108 32 95 Q21 81 32 62 Q42 46 60 20 Z" fill="#7cc7ec" opacity=".94"/><ellipse cx="43" cy="62" rx="8" ry="15" fill="#fff" opacity=".55" transform="rotate(-16 43 62)"/><circle cx="50" cy="78" r="3.5" fill="#173a52"/><circle cx="70" cy="78" r="3.5" fill="#173a52"/><path d="M54 88 Q60 93 66 88" stroke="#173a52" stroke-width="2.4" fill="none" stroke-linecap="round"/><circle cx="42" cy="87" r="3.2" fill="#5aa7d6"/><circle cx="78" cy="87" r="3.2" fill="#5aa7d6"/></svg>'},
-{id:'flickit',name:'Flickit',tag:'Ember',base:96,spread:44,diff:3,size:.94,move:'dart',anim:'anim-dart',w:3,
- svg:'<svg viewBox="0 0 120 120"><path d="M82 76 Q112 66 106 38 Q118 62 106 84 Q97 94 82 88 Z" fill="#d97f43"/><path d="M104 42 Q113 58 106 74 Q110 56 100 46 Z" fill="#f6e7d2"/><rect x="40" y="88" width="9" height="16" rx="4.5" fill="#c9743c"/><rect x="62" y="88" width="9" height="16" rx="4.5" fill="#c9743c"/><ellipse cx="56" cy="74" rx="26" ry="20" fill="#e8945a"/><circle cx="40" cy="50" r="18" fill="#e8945a"/><path d="M30 38 L25 14 L44 30 Z" fill="#c9743c"/><path d="M46 33 L49 12 L59 31 Z" fill="#c9743c"/><path d="M26 54 L8 60 L26 66 Z" fill="#f6e7d2"/><circle cx="36" cy="47" r="3" fill="#2a2118"/><circle cx="48" cy="45" r="3" fill="#2a2118"/><circle cx="11" cy="60" r="2.8" fill="#2a2118"/><ellipse cx="58" cy="80" rx="9" ry="6" fill="#f6e7d2"/></svg>'},
-{id:'buzzlet',name:'Buzzlet',tag:'Zap',base:84,spread:40,diff:3,size:.76,move:'drifter',anim:'anim-hover',w:3,fly:16,
- svg:'<svg viewBox="0 0 120 120"><ellipse class="wing" cx="34" cy="44" rx="17" ry="8" fill="#dff3ff" opacity=".85" transform="rotate(-32 34 44)"/><ellipse class="wing" cx="86" cy="44" rx="17" ry="8" fill="#dff3ff" opacity=".85" transform="rotate(32 86 44)"/><path d="M52 40 Q46 26 38 24 M68 40 Q74 26 82 24" stroke="#3a3428" stroke-width="3.4" fill="none" stroke-linecap="round"/><circle cx="38" cy="24" r="3.4" fill="#3a3428"/><circle cx="82" cy="24" r="3.4" fill="#3a3428"/><ellipse cx="60" cy="66" rx="30" ry="25" fill="#f4c531"/><path d="M47 43 Q42 66 47 89" stroke="#3a3428" stroke-width="9" fill="none"/><path d="M73 43 Q78 66 73 89" stroke="#3a3428" stroke-width="9" fill="none"/><path d="M60 91 L60 103 M56 103 L64 103" stroke="#3a3428" stroke-width="4" stroke-linecap="round"/><circle cx="53" cy="60" r="3.6" fill="#231f18"/><circle cx="67" cy="60" r="3.6" fill="#231f18"/><path d="M56 69 Q60 72 64 69" stroke="#231f18" stroke-width="2" fill="none" stroke-linecap="round"/></svg>'},
-{id:'chilliw',name:'Chilliw',tag:'Frost',base:108,spread:46,diff:4,size:.96,move:'slide',anim:'anim-shimmy',w:2,
- svg:'<svg viewBox="0 0 120 120"><rect x="16" y="64" width="14" height="8" rx="4" fill="#8fd4e8"/><rect x="90" y="64" width="14" height="8" rx="4" fill="#8fd4e8"/><path d="M60 28 L88 45 L88 84 L60 101 L32 84 L32 45 Z" fill="#bfeaf5" stroke="#8fd4e8" stroke-width="3" stroke-linejoin="round"/><path d="M60 42 L78 52 L78 78 L60 88 L42 78 L42 52 Z" fill="#e6f9ff" opacity=".75"/><path d="M60 56 v20 M51 61 l18 10 M69 61 l-18 10" stroke="#69b8d8" stroke-width="3" stroke-linecap="round"/><circle cx="51" cy="55" r="3" fill="#1d4254"/><circle cx="69" cy="55" r="3" fill="#1d4254"/></svg>'},
-{id:'wispurr',name:'Wispurr',tag:'Veil',base:126,spread:50,diff:4,size:.9,move:'drifter',anim:'anim-float',w:2,fly:22,
- svg:'<svg viewBox="0 0 120 120"><path d="M40 44 L34 22 L54 36 Z" fill="#cfc3ee"/><path d="M80 44 L86 22 L66 36 Z" fill="#cfc3ee"/><path d="M42 40 L39 28 L50 37 Z" fill="#e8d9f2"/><path d="M78 40 L81 28 L70 37 Z" fill="#e8d9f2"/><path d="M32 94 Q37 103 45 96 Q51 105 60 98 Q69 105 75 96 Q83 103 88 94 L88 62 Q88 34 60 34 Q32 34 32 62 Z" fill="#cfc3ee"/><ellipse cx="50" cy="62" rx="5" ry="7" fill="#4a3d78"/><ellipse cx="70" cy="62" rx="5" ry="7" fill="#4a3d78"/><circle cx="51.6" cy="59.4" r="1.7" fill="#fff"/><circle cx="71.6" cy="59.4" r="1.7" fill="#fff"/><path d="M55 75 Q60 80 65 75" stroke="#4a3d78" stroke-width="2.2" fill="none" stroke-linecap="round"/><path d="M56 75 l2 4.4 l2 -4.4 M62 75 l2 4.4 l2 -4.4" fill="#fff"/><circle cx="42" cy="70" r="2.4" fill="#b9a8e0"/><circle cx="78" cy="70" r="2.4" fill="#b9a8e0"/></svg>'},
-{id:'pebblo',name:'Pebblo',tag:'Stone',base:150,spread:56,diff:5,size:1.15,move:'statue',anim:'anim-tremble',w:1,
- svg:'<svg viewBox="0 0 120 120"><rect x="12" y="56" width="17" height="28" rx="8.5" fill="#8b8b83"/><rect x="91" y="56" width="17" height="28" rx="8.5" fill="#8b8b83"/><path d="M30 102 L24 66 Q24 40 52 34 Q86 28 94 58 L98 102 Z" fill="#9a9a90"/><path d="M44 52 L52 62 L46 72 M74 44 L70 56 L80 64" stroke="#77776e" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M34 46 Q42 28 60 31 Q80 28 92 52 Q76 44 62 48 Q46 42 34 46 Z" fill="#7fae5c"/><circle cx="48" cy="70" r="4.2" fill="#2e2e28"/><circle cx="72" cy="70" r="4.2" fill="#2e2e28"/><path d="M54 82 Q60 86 66 82" stroke="#2e2e28" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg>'},
-{id:'lumina',name:'Lumina',tag:'Radiant',base:180,spread:60,diff:5,size:.88,move:'drifter',anim:'anim-pulse',w:.7,fly:26,
- svg:'<svg viewBox="0 0 120 120"><circle cx="60" cy="66" r="42" fill="#ffe9a3" opacity=".35"/><path d="M60 14 L64 30 L80 30 L67 40 L72 56 L60 46 L48 56 L53 40 L40 30 L56 30 Z" fill="#ffb43b"/><path d="M28 86 Q28 46 60 46 Q92 46 92 86 Z" fill="#ffd45e"/><circle cx="50" cy="68" r="3.2" fill="#7a5410"/><circle cx="70" cy="68" r="3.2" fill="#7a5410"/><path d="M54 77 Q60 83 66 77" stroke="#7a5410" stroke-width="2.4" fill="none" stroke-linecap="round"/><path d="M22 50 l2.4 5.6 5.6 2.4 -5.6 2.4 -2.4 5.6 -2.4 -5.6 -5.6 -2.4 5.6 -2.4 Z" fill="#fff" opacity=".9"/><path d="M96 82 l1.8 4.2 4.2 1.8 -4.2 1.8 -1.8 4.2 -1.8 -4.2 -4.2 -1.8 4.2 -1.8 Z" fill="#fff" opacity=".8"/></svg>'}
-];
-const spById=id=>SPECIES.find(s=>s.id===id);
+       Pointer position (-1..1 on both axes) is smoothed with an
+       exponential lerp and applied to each background layer at a
+       depth-graded factor, so nearer layers pan more. The player is
+       glued to the near layer so he stays standing on the road.
+       ============================================================ */
+    const lySky = $('#lySky');
+    const lyFar = $('#lyFar');
+    const lyMid = $('#lyMid');
+    const lyNear = $('#lyNear');
+    const eFar = $('#eFar');
+    const eGround = $('#eGround');
 
-/* ---------------- save ---------------- */
-const KEY='wandergrove-v1';
-function loadSave(){try{const s=JSON.parse(localStorage.getItem(KEY));
-  if(s&&s.v===1)return s}catch(e){}
-  return{v:1,intro:false,hint:false,caught:[],stats:{throws:0,hits:0,catches:0}}}
-let save=loadSave();
-function persist(){try{localStorage.setItem(KEY,JSON.stringify(save))}catch(e){}}
-function powerTier(p){return p<100?'t1':p<180?'t2':p<260?'t3':'t4'}
+    const PARALLAX_LAYERS = [
+      { el: lySky,   fx: 7,  fy: 3  },
+      { el: lyFar,   fx: 16, fy: 7  },
+      { el: lyMid,   fx: 28, fy: 12 },
+      { el: lyNear,  fx: 42, fy: 18 },
+    ];
+    const ENCOUNTER_LAYERS = [
+      { el: eFar,    fx: 9,  fy: 0  },
+      { el: eGround, fx: 16, fy: 0  },
+    ];
 
-/* ---------------- fx particles ---------------- */
-const fctx=fxC.getContext('2d');let parts=[];
-function sizeFx(){const d=Math.min(devicePixelRatio||1,2);
-  fxC.width=innerWidth*d;fxC.height=innerHeight*d;fctx.setTransform(d,0,0,d,0,0)}
-sizeFx();
-function burst(x,y,n,colors,opts){opts=opts||{};for(let i=0;i<n;i++){
-  const a=rand(0,TAU),sp=rand(opts.s0||60,opts.s1||260);
-  parts.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-(opts.up||60),g:opts.g==null?520:opts.g,
-    life:rand(.5,.95),t:0,r:rand(2.4,5.2),c:colors[i%colors.length],
-    sh:opts.sh||['star','circle','petal'][i%3]})}}
-function drawFx(dt){if(!parts.length){if(enc.classList.contains('on'))fctx.clearRect(0,0,innerWidth,innerHeight);return}
-  fctx.clearRect(0,0,innerWidth,innerHeight);
-  parts=parts.filter(p=>{p.t+=dt;if(p.t>=p.life)return false;
-    p.vy+=p.g*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;
-    const k=1-p.t/p.life;fctx.globalAlpha=k;fctx.fillStyle=p.c;
-    fctx.save();fctx.translate(p.x,p.y);fctx.rotate(p.t*6);
-    if(p.sh==='circle'){fctx.beginPath();fctx.arc(0,0,p.r,0,TAU);fctx.fill()}
-    else if(p.sh==='petal'){fctx.beginPath();fctx.ellipse(0,0,p.r*1.5,p.r*.7,0,0,TAU);fctx.fill()}
-    else{fctx.beginPath();for(let i=0;i<5;i++){const a=-Math.PI/2+i*TAU/5;
-      fctx.lineTo(Math.cos(a)*p.r*1.8,Math.sin(a)*p.r*1.8);
-      const a2=a+TAU/10;fctx.lineTo(Math.cos(a2)*p.r*.8,Math.sin(a2)*p.r*.8)}
-      fctx.closePath();fctx.fill()}
-    fctx.restore();return true});
-  fctx.globalAlpha=1}
+    const pointerTarget = { x: 0, y: 0 }; // where the layers want to go
+    const pointerCurrent = { x: 0, y: 0 }; // where they actually are (lerped)
 
-/* ---------------- map: spawn & wander ---------------- */
-let creatures=[];
-const fieldTop=()=>innerHeight*.36, fieldBot=()=>innerHeight*.84;
-function pickSpecies(){const cur={};creatures.forEach(o=>cur[o.sp.id]=(cur[o.sp.id]||0)+1);
-  const pool=SPECIES.filter(s=>(cur[s.id]||0)<2);
-  let tot=0;pool.forEach(s=>tot+=s.w);let r=Math.random()*tot;
-  for(const s of pool){r-=s.w;if(r<=0)return s}return pool[0]||SPECIES[0]}
-function spawnOne(delay){setTimeout(()=>{
-  if(creatures.length>=6)return;
-  const sp=pickSpecies();
-  const inst={sp,pow:Math.round(sp.base+Math.random()*sp.spread),
-    hue:Math.round(rand(-16,16)),scl:rand(.88,1.16),
-    x:rand(50,innerWidth-50),y:rand(sp.fly?fieldTop():innerHeight*.585,fieldBot()),
-    dir:Math.random()<.5?-1:1,vx:0,face:1,turnT:rand(1,3),
-    hopT:0,hopDur:.4,restT:rand(.5,2),hopY:0,ph:rand(0,TAU),el:null};
-  const w=74*sp.size*inst.scl;
-  const el=document.createElement('div');el.className='crit';
-  el.innerHTML='<div class="cpw '+powerTier(inst.pow)+'" style="bottom:'+(w*1.02)+'px">'+inst.pow+'</div>'+
-    '<div class="chopt"><div class="cwrap anim-x" style="width:'+w+'px;height:'+w+'px;left:'+(-w/2)+'px">'+
-    '<div class="cflip">'+sp.svg+'</div></div></div><div class="cshadow"></div>';
-  el.querySelector('.cwrap').classList.remove('anim-x');el.querySelector('.cwrap').classList.add(sp.anim);
-  el.querySelector('.cflip').style.filter='hue-rotate('+inst.hue+'deg)';
-  el.addEventListener('pointerdown',ev=>{ev.stopPropagation();openEncounter(inst)});
-  fieldEl.appendChild(el);inst.el=el;creatures.push(inst)},delay||0)}
-function updCreatures(dt,t){
-  const ft=innerHeight*.585,fb=fieldBot();
-  for(const o of creatures){
-    switch(o.sp.move){
-      case 'statue':o.vx=0;break;
-      case 'walker':o.turnT-=dt;if(o.turnT<=0){o.turnT=rand(2.5,6);if(Math.random()<.55)o.dir*=-1}
-        o.vx=o.dir*14;break;
-      case 'slide':o.turnT-=dt;if(o.turnT<=0){o.turnT=rand(1.8,4.5);o.dir=Math.random()<.5?-1:1}
-        o.vx=o.dir*26;break;
-      case 'hopper':
-        if(o.hopT>0){o.hopT-=dt;const pr=1-o.hopT/o.hopDur;o.vx=o.dir*o.hopV;
-          o.hopY=-Math.sin(pr*Math.PI)*15;
-          if(o.hopT<=0){o.hopY=0;o.vx=0;o.restT=rand(.9,2.6)}}
-        else{o.restT-=dt;if(o.restT<=0){o.hopDur=rand(.3,.42);o.hopT=o.hopDur;
-          o.dir=Math.random()<.5?-1:1;o.hopV=rand(46,92)}}break;
-      case 'dart':
-        if(o.hopT>0){o.hopT-=dt;const pr=1-o.hopT/o.hopDur;o.vx=o.dir*o.hopV;
-          o.hopY=-Math.sin(pr*Math.PI)*12;
-          if(o.hopT<=0){o.hopY=0;o.vx=0;o.restT=rand(.4,1.4)}}
-        else{o.restT-=dt;if(o.restT<=0){o.hopDur=rand(.16,.24);o.hopT=o.hopDur;
-          o.dir=Math.random()<.5?-1:1;o.hopV=rand(120,190)}}break;
-      case 'drifter':o.turnT-=dt;if(o.turnT<=0){o.turnT=rand(2,5);o.dir=Math.random()<.5?-1:1}
-        o.vx=o.dir*17;o.hopY=-(o.sp.fly||0)+Math.sin(t*2+o.ph)*5;break;
+    window.addEventListener('pointermove', e => {
+      pointerTarget.x = (e.clientX / innerWidth - .5) * 2;
+      pointerTarget.y = (e.clientY / innerHeight - .5) * 2;
+    });
+
+    function updParallax(dt) {
+      const k = 1 - Math.exp(-dt * 3.5);
+      pointerCurrent.x += (pointerTarget.x - pointerCurrent.x) * k;
+      pointerCurrent.y += (pointerTarget.y - pointerCurrent.y) * k;
+
+      const shift = (layer) => {
+        if (!layer.el) return;
+        const x = (-pointerCurrent.x * layer.fx).toFixed(1);
+        const y = (-pointerCurrent.y * layer.fy).toFixed(1);
+        layer.el.style.transform = 'translate3d(' + x + 'px,' + y + 'px,0)';
+      };
+      PARALLAX_LAYERS.forEach(shift);
+      ENCOUNTER_LAYERS.forEach(shift);
+
+      if (playerEl) {
+        const off = -pointerCurrent.x * 42;
+        const sign = off < 0 ? '- ' : '+ ';
+        playerEl.style.transform =
+          'translate3d(calc(-50% ' + sign + Math.abs(off).toFixed(1) + 'px),0,0)';
+      }
     }
-    o.x+=o.vx*dt;
-    if(o.x<34){o.x=34;o.dir=1;if(o.sp.move!=='hopper'&&o.sp.move!=='dart')o.vx=Math.abs(o.vx)}
-    if(o.x>innerWidth-34){o.x=innerWidth-34;o.dir=-1;if(o.sp.move!=='hopper'&&o.sp.move!=='dart')o.vx=-Math.abs(o.vx)}
-    if(o.vx) o.face=o.vx>0?-1:1;
-    const depth=.78+.42*((o.y-ft)/(fb-ft));
-    o.el.style.transform='translate('+o.x+'px,'+o.y+'px) scale('+(depth*o.scl).toFixed(3)+')';
-    o.el.querySelector('.chopt').style.transform='translateY('+o.hopY.toFixed(1)+'px)';
-    o.el.querySelector('.cflip').style.transform='scaleX('+o.face+')';
-  }}
 
-/* ---------------- encounter ---------------- */
-const G=2000,K=8,CAP=2700;
-let E=null,pv={x:0,y:0},lastP=null;
-function segCircle(x0,y0,x1,y1,cx,cy,r){const dx=x1-x0,dy=y1-y0,l2=dx*dx+dy*dy;
-  let t=l2?((cx-x0)*dx+(cy-y0)*dy)/l2:0;t=clamp(t,0,1);
-  const px=x0+dx*t-cx,py=y0+dy*t-cy;return px*px+py*py<=r*r}
-function throwVel(){const dx=E.bx-E.press.x,dy=E.by-E.press.y;
-  let vx=dx*K+pv.x*.5,vy=dy*K+pv.y*.5;
-  const sp=Math.hypot(vx,vy);if(sp>CAP){vx*=CAP/sp;vy*=CAP/sp}
-  return{vx,vy}}
-function depthScale(y){return 1-.42*clamp((E.restY-y)/(E.restY-E.crit.y+40),0,1)}
-function ballTo(x,y){if(!E)return;E.bx=x;E.by=y;
-  if(E.state==='held'||E.state==='fly'||E.state==='return')E.bsc=depthScale(y);
-  else if(E.state==='rest')E.bsc=1;
-  ballEl.style.transform='translate3d('+(x-32)+'px,'+(y-32)+'px,0) scale('+(E.bsc||1).toFixed(3)+')'}
-function ballRot(deg){ballIn.style.transform='rotate('+deg+'deg)'}
-function setPlate(inst){const sp=inst.sp;
-  $('#encName').textContent=sp.name;
-  $('#encTag').textContent=sp.tag+' · '+(sp.diff<=2?'common':sp.diff===3?'uncommon':sp.diff===4?'rare':'very rare');
-  $('#encPowN').textContent=inst.pow;
-  $('#encPowN').style.color={t1:'#6b7a4a',t2:'#2f8a52',t3:'#2f6cb8',t4:'#7d3fc4'}[powerTier(inst.pow)]}
-function openEncounter(inst){if(E)return;ac();cry(inst.sp.name);
-  const W=innerWidth,H=innerHeight;
-  const cw=Math.round(180*inst.sp.size*inst.scl);
-  enc.classList.add('on');
-  const crit={x:W*.5,y:H*.40,r:Math.min(92,44*inst.sp.size*inst.scl+26)};
-  E={W,H,inst,crit,state:'rest',bx:W*.5,by:H-118,restX:W*.5,restY:H-118,groundY:H*.62,
-     vx:0,vy:0,hold:false,press:null,ringM:1.9,ringT:0,spin:0,bsc:1,cw,
-     wobN:0,wobT:0,lastWob:-1,bounces:0,fade:0,willCatch:false};
-  encCritIn.className='';encCritIn.style.opacity=1;
-  encCritIn.style.transform='';
-  stampEl.classList.remove('show');
-  ringEl.classList.remove('flash');
-  encHop.style.left='50%';
-  const critBox=encCritIn.parentElement;
-  critBox.style.width=cw+'px';critBox.style.height=cw+'px';
-  critBox.style.transform='translate(-50%,-50%)';
-  encWrap.style.cssText='width:'+cw+'px;height:'+cw+'px;left:'+(-cw/2)+'px;bottom:0';
-  const shd=encCritIn.querySelector('.cshadow');
-  shd.style.cssText='width:'+(cw*.5)+'px;left:'+(-cw*.25)+'px;bottom:-8px;top:auto;margin-left:0';
-  encWrap.className='cwrap '+inst.sp.anim;
-  encWrap.innerHTML='<div class="cflip" style="filter:hue-rotate('+inst.hue+'deg)">'+inst.sp.svg+'</div>';
-  encHop.style.transform='';
-  $('#encLabel').style.top=(H*.40-cw/2-72)+'px';
-  flyShadowEl.style.opacity=0;
-  setPlate(inst);
-  ballIn.innerHTML=BALL_SVG;ballEl.classList.remove('hide','glow');ballRot(0);
-  ballTo(E.restX,E.restY);
-  $('#ribbon').classList.remove('show');
-  if(!save.hint){save.hint=true;persist();$('#mapHint').style.display='none'}
-  sizeFx()}
-function closeEncounter(){enc.classList.remove('on');E=null;parts=[]}
-function showRibbon(txt){ribbonEl.textContent=txt;ribbonEl.classList.add('show');
-  setTimeout(()=>ribbonEl.classList.remove('show'),1000)}
-function showStamp(txt){stampEl.textContent=txt;stampEl.classList.remove('show');
-  void stampEl.offsetWidth;stampEl.classList.add('show')}
-function catchChance(ringM,diff,pow){let p=.9-diff*.075;
-  if(ringM<.85)p+=.18;else if(ringM<1.25)p+=.10;else p+=.04;
-  p-=clamp((pow-180)/1200,0,.12);return clamp(p,.42,.97)}
-function onHit(){E.state='suck';save.stats.hits++;flyShadowEl.style.opacity=0;
-  const ring=E.ringM;
-  const lbl=ring<.85?'EXCELLENT!':ring<1.25?'GREAT!':'NICE!';
-  showRibbon(lbl);
-  E.willCatch=Math.random()<catchChance(E.ringM,E.inst.sp.diff,E.inst.pow);
-  ballTo(E.crit.x,E.crit.y-4);
-  ringEl.classList.add('flash');
-  encCritIn.classList.add('sucked');
-  tone(880,.14,'sine',.18,620);
-  burst(E.crit.x,E.crit.y,16,['#ffd45e','#fff8dd','#8fd9a0'],{up:40});
-  setTimeout(()=>{if(!E)return;E.state='drop';E.vx=rand(-26,26);E.vy=-60;ballEl.classList.add('glow')},360)}
-function resolveWobble(){E.state='result';flyShadowEl.style.opacity=0;
-  if(E.willCatch){ // ---- caught ----
-    chime();showStamp('CAUGHT!');
-    burst(E.bx,E.by-30,34,['#ffd45e','#fff','#8fd9a0','#7cc7ec'],{up:150,s1:340,sh:'star'});
-    save.stats.catches=(save.stats.catches||0)+1;
-    save.caught.push({id:E.inst.sp.id,pow:E.inst.pow,hue:E.inst.hue,scl:E.inst.scl,at:Date.now()});
-    persist();refreshJCount();
-    const c=E.inst;c.leaving=true;c.el.classList.add('leaving');
-    playerWalkTo(c.x);
-    setTimeout(()=>{const i=creatures.indexOf(c);if(i>=0)creatures.splice(i,1);c.el.remove();
-      spawnOne(rand(2200,4200))},480);
-    setTimeout(closeEncounter,1050)}
-  else{ // ---- broke free ----
-    popS();sadS();showStamp('BROKE FREE!');
-    ballEl.classList.add('hide');
-    burst(E.bx,E.by-20,20,['#fff','#dff3ff','#cfe3b8'],{up:110,s1:300});
-    encCritIn.classList.remove('sucked');encCritIn.classList.add('pop');
-    requestAnimationFrame(()=>{encCritIn.classList.add('angry')});
-    persist();
-    setTimeout(()=>{if(!E)return;ballEl.classList.remove('glow','hide');
-      E.state='return'},820)}}
-function missBall(){E.state='fade';E.fade=.4;flyShadowEl.style.opacity=0;sadS()}
-function resetReturn(){E.state='return'}
-function updEnc(dt){
-  // focus ring
-  if(E.state==='rest'||E.state==='held'||E.state==='fly'){
-    E.ringT=(E.ringT+dt)%4.3;E.ringM=1.9-(E.ringT/4.3)*1.25;
-    ringEl.style.transform='scale('+E.ringM.toFixed(3)+')'}
-  switch(E.state){
-    case 'fly':{const px=E.bx,py=E.by;
-      E.vy+=G*dt;E.bx+=E.vx*dt;E.by+=E.vy*dt;
-      if(E.bx<22){E.bx=22;E.vx*=-.5}if(E.bx>E.W-22){E.bx=E.W-22;E.vx*=-.5}
-      if(E.by<-140)E.by=-140;
-      E.spin+=E.vx*dt*.9;ballRot(E.spin%360);
-      const hf=clamp(1-(E.groundY-E.by)/380,.35,1);
-      flyShadowEl.style.opacity=(.3*hf*E.bsc).toFixed(3);
-      flyShadowEl.style.transform='translate3d('+E.bx.toFixed(1)+'px,'+(E.groundY-4)+'px,0) scale('+(E.bsc*hf).toFixed(3)+')';
-      if(segCircle(px,py,E.bx,E.by,E.crit.x,E.crit.y,E.crit.r)){onHit();break}
-      if(E.vy>0&&E.by>=E.groundY){E.by=E.groundY;E.bounces++;
-        E.vy=-E.vy*.42;E.vx*=.65;tickS();
-        if(E.bounces>=2||Math.abs(E.vy)<130)missBall();break}
-      if(E.by>E.H+60)missBall();
-      ballTo(E.bx,E.by);break}
-    case 'drop':E.vy+=G*dt;E.bx+=E.vx*dt;E.by+=E.vy*dt;
-      {const hf=clamp(1-(E.groundY-E.by)/380,.4,1);
-      flyShadowEl.style.opacity=(.3*hf*E.bsc).toFixed(3);
-      flyShadowEl.style.transform='translate3d('+E.bx.toFixed(1)+'px,'+(E.groundY-4)+'px,0) scale('+(E.bsc*hf).toFixed(3)+')'}
-      if(E.by>=E.groundY){E.by=E.groundY;ballTo(E.bx,E.by);
-        E.wobN=E.willCatch?3:(Math.random()<.5?1:2);E.wobT=0;E.lastWob=-1;E.state='wobble';break}
-      ballTo(E.bx,E.by);break;
-    case 'wobble':{E.wobT+=dt;const d=.7;
-      flyShadowEl.style.opacity=(.3*E.bsc).toFixed(3);
-      flyShadowEl.style.transform='translate3d('+E.bx.toFixed(1)+'px,'+(E.groundY-4)+'px,0) scale('+E.bsc.toFixed(3)+')';
-      const idx=Math.floor(E.wobT/d);
-      if(idx!==E.lastWob&&idx<E.wobN){E.lastWob=idx;tickS()}
-      if(E.wobT>=E.wobN*d){ballRot(0);resolveWobble();break}
-      const ph=(E.wobT%d)/d;ballRot(Math.sin(ph*TAU)*16*(1-idx*.12));break}
-    case 'fade':E.fade-=dt;ballEl.style.opacity=Math.max(0,E.fade/.4);
-      if(E.fade<=0){ballEl.style.opacity=1;E.state='return'}break;
-    case 'return':{const k=1-Math.exp(-dt*9);
-      E.bx+=(E.restX-E.bx)*k;E.by+=(E.restY-E.by)*k;
-      ballTo(E.bx,E.by);ballRot(0);
-      if(Math.abs(E.restX-E.bx)<1.2&&Math.abs(E.restY-E.by)<1.2){
-        ballTo(E.restX,E.restY);ballEl.classList.remove('glow');E.state='rest';
-        stampEl.classList.remove('show')}break}
-  }}
-/* encounter input: grab anywhere in lower half */
-enc.addEventListener('pointerdown',e=>{
-  if(!E||E.state!=='rest')return;
-  if(e.clientY<E.H*.5)return;
-  E.hold=true;E.press={x:e.clientX,y:e.clientY};
-  pv={x:0,y:0};lastP={x:e.clientX,y:e.clientY,t:performance.now()};
-  E.state='held';ballTo(clamp(e.clientX,30,E.W-30),clamp(e.clientY,E.H*.32,E.H-70))});
-window.addEventListener('pointermove',e=>{
-  if(!E||!E.hold||E.state!=='held')return;
-  const t=performance.now();
-  if(lastP){const d=(t-lastP.t)/1000;
-    if(d>.004){const nvx=(e.clientX-lastP.x)/d,nvy=(e.clientY-lastP.y)/d;
-      pv.x=pv.x*.35+nvx*.65;pv.y=pv.y*.35+nvy*.65}}
-  lastP={x:e.clientX,y:e.clientY,t};
-  ballTo(clamp(e.clientX,30,E.W-30),clamp(e.clientY,E.H*.32,E.H-70))});
-function releaseBall(){if(!E||!E.hold||E.state!=='held')return;
-  E.hold=false;const v=throwVel();
-  E.vx=v.vx;E.vy=v.vy;E.state='fly';E.bounces=0;E.spin=0;
-  save.stats.throws++;whoosh()}
-window.addEventListener('pointerup',releaseBall);
-window.addEventListener('pointercancel',releaseBall);
-/* touch fallback for older browsers */
-enc.addEventListener('touchstart',e=>{if(window.PointerEvent)return;
-  const t=e.touches[0];enc.dispatchEvent(new PointerEvent('pointerdown',{clientX:t.clientX,clientY:t.clientY}))},{passive:true});
-window.addEventListener('touchmove',e=>{if(window.PointerEvent||!E||!E.hold)return;
-  const t=e.touches[0];window.dispatchEvent(new PointerEvent('pointermove',{clientX:t.clientX,clientY:t.clientY}))},{passive:true});
-window.addEventListener('touchend',e=>{if(window.PointerEvent||!E||!E.hold)return;
-  window.dispatchEvent(new PointerEvent('pointerup',{}))},{passive:true});
- $('#btnBack').addEventListener('click',()=>{if(E&&E.state==='rest')closeEncounter()});
-window.addEventListener('resize',()=>{sizeFx();
-  if(E){E.W=innerWidth;E.H=innerHeight;E.crit.x=innerWidth*.5;E.crit.y=innerHeight*.40;
-    E.restX=innerWidth*.5;E.restY=innerHeight-118;E.groundY=innerHeight*.62;
-    $('#encLabel').style.top=(E.H*.40-E.cw/2-72)+'px';
-    if(E.state==='rest'||E.state==='return')ballTo(E.restX,E.restY)}
-  if(playerPx!=null){const tx=clamp(playerPx,innerWidth*.14,innerWidth*.86);
-    if(tx!==playerPx){playerPx=tx;playerEl.style.left=tx+'px'}}});
+    let playerPx = null; // player's current x in px (null = CSS default)
 
-/* ---------------- ball: the Glowseed ---------------- */
-const BALL_SVG='<svg viewBox="0 0 120 120">'+
- '<defs><radialGradient id="gsB" cx="38%" cy="30%" r="80%">'+
- '<stop offset="0%" stop-color="#dcf8d2"/><stop offset="45%" stop-color="#8fd9a0"/>'+
- '<stop offset="100%" stop-color="#3f9e86"/></radialGradient>'+
- '<radialGradient id="gsC" cx="50%" cy="50%" r="50%">'+
- '<stop offset="0%" stop-color="#fff6cf"/><stop offset="55%" stop-color="#ffd45e"/>'+
- '<stop offset="100%" stop-color="#ffb43b" stop-opacity="0"/></radialGradient></defs>'+
- '<g transform="translate(60 20)"><path d="M0 6 L0 16" stroke="#3e7a3a" stroke-width="4.5" stroke-linecap="round"/>'+
- '<path d="M0 6 Q-3 -9 -16 -11 Q-5 -14 2 -4 Z" fill="#4e9e4a"/>'+
- '<path d="M0 6 Q3 -9 16 -11 Q5 -14 -2 -4 Z" fill="#6fbe5e"/></g>'+
- '<circle cx="60" cy="68" r="42" fill="url(#gsB)"/>'+
- '<circle cx="60" cy="68" r="13" fill="url(#gsC)"/>'+
- '<g transform="rotate(-8 60 68)"><ellipse cx="60" cy="68" rx="42" ry="9.5" fill="none" stroke="#e8b23a" stroke-width="6.5"/>'+
- '<circle cx="18" cy="68" r="2.6" fill="#c98f2a"/><circle cx="102" cy="68" r="2.6" fill="#c98f2a"/></g>'+
- '<ellipse cx="45" cy="47" rx="10" ry="6" fill="#fff" opacity=".8" transform="rotate(-24 45 47)"/>'+
- '<circle cx="80" cy="90" r="4" fill="#fff" opacity=".35"/></svg>';
+    // Stroll over to where a critter was just caught.
+    function playerWalkTo(x) {
+      const w = innerWidth;
+      const tx = clamp(x, w * .14, w * .86);
+      const cur = playerPx == null ? w * .504 : playerPx;
 
-/* ---------------- sheets ---------------- */
-function refreshJCount(){const uniq=new Set(save.caught.map(c=>c.id));
-  $('#jCount').textContent=uniq.size}
-function openSheet(kind){const b=$('#sheetBody'),t=$('#sheetTitle');
-  if(kind==='journal'){t.textContent='Journal';
-    const uniq=new Set(save.caught.map(c=>c.id));
-    let h='<div class="jstat">'+uniq.size+' of 10 species met &middot; '+save.caught.length+' caught &middot; '+
-      (save.stats.throws||0)+(save.stats.throws===1?' toss':' tosses')+'</div>';
-    if(!save.caught.length){h+='<div class="jempty">No critters yet.<br>Go tap one in the park!</div>'}
-    else{const groups={};save.caught.forEach(c=>{const g=groups[c.id]||(groups[c.id]={n:0,best:0,at:0});
-        g.n++;if(c.pow>g.best)g.best=c.pow;if(c.at>g.at)g.at=c.at});
-      h+='<div class="jgrid">'+Object.keys(groups).map(id=>{const sp=spById(id),g=groups[id];
-        const pw=powerTier(g.best);
-        return '<div class="jcard">'+sp.svg+'<div class="jn">'+sp.name+'</div><div class="jt">'+sp.tag+
-          '</div><div class="jp '+pw+'">PW '+g.best+'</div><div class="jc">x'+g.n+'</div></div>'}).join('')+'</div>'}
-    b.innerHTML=h}
-  else{t.textContent='How to play';
-    b.innerHTML=
-     '<div class="gline"><div class="gnum">1</div><div class="gtxt">Critters wander the park on their own. Tap one to walk up close.</div></div>'+
-     '<div class="gline"><div class="gnum">2</div><div class="gtxt">Press anywhere in the lower half, then flick to toss the Glowseed — it flies in the direction you flick it, like a real throw.</div></div>'+
-     '<div class="gline"><div class="gnum">3</div><div class="gtxt">The white ring shrinks over the critter. A hit while it is small gives EXCELLENT or GREAT bonus odds.</div></div>'+
-     '<div class="gline"><div class="gnum">4</div><div class="gtxt">The POWER badge hints how stubborn a critter is. Higher POWER, more resistance.</div></div>'}
-  $('#sheetBack').classList.add('on');$('#sheet').classList.add('on')}
-function closeSheet(){$('#sheetBack').classList.remove('on');$('#sheet').classList.remove('on')}
- $('#btnJournal').addEventListener('click',()=>{ac();openSheet('journal')});
- $('#btnGuide').addEventListener('click',()=>{ac();openSheet('guide')});
- $('#sheetClose').addEventListener('click',closeSheet);
- $('#sheetBack').addEventListener('click',closeSheet);
+      playerEl.style.transitionDuration = clamp(Math.abs(tx - cur) / 130, 1, 3).toFixed(1) + 's';
+      playerEl.style.left = tx + 'px';
+      playerPx = tx;
 
-/* ---------------- intro ---------------- */
-if(save.intro)$('#intro').classList.add('hidden');
-if(save.hint)$('#mapHint').style.display='none';
- $('#btnStart').addEventListener('click',()=>{ac();save.intro=true;persist();
-  $('#intro').classList.add('hidden');
-  if(!save.hint)$('#mapHint').style.display='';
-  tone(660,.12,'sine',.14,220)});
+      const dir = tx < cur ? -1 : 1;
+      playerEl.querySelector('svg').style.transform = 'scaleX(' + dir + ') rotate(' + (dir * 3) + 'deg)';
+      clearTimeout(playerWalkTo._t);
+      playerWalkTo._t = setTimeout(() => {
+        playerEl.querySelector('svg').style.transform = '';
+      }, 2600);
+    }
 
-/* ---------------- main loop ---------------- */
-let lastT=performance.now();
-function loop(now){const dt=Math.min(.032,(now-lastT)/1000);lastT=now;
-  updCreatures(dt,now/1000);
-  updParallax(dt);
-  if(E)updEnc(dt);
-  drawFx(dt);
-  requestAnimationFrame(loop)}
+    /* ============================================================
+       7b. AUDIO — everything is synthesized with WebAudio
+       ============================================================ */
+    let audioCtx = null;
 
-/* ---------------- boot ---------------- */
-refreshJCount();
-for(let i=0;i<6;i++)spawnOne(i*120);
-requestAnimationFrame(loop);
+    function ac() {
+      if (!audioCtx) {
+        try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* no audio */ }
+      }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+      return audioCtx;
+    }
 
-/* ---------------- autotest hook ---------------- */
-window.__testCatch=function(spIdx){spIdx=spIdx||0;
-  return new Promise(res=>{
-    if(E)closeEncounter();
-    let inst=creatures.find(o=>o.sp===SPECIES[spIdx])||creatures[0];
-    openEncounter(inst);
-    setTimeout(()=>{if(!E)return res({err:'no encounter'});
-      const T=.55;
-      E.vx=(E.crit.x-E.bx)/T;E.vy=(E.crit.y-E.by)/T-.5*G*T;
-      E.state='fly';E.bounces=0;
-      save.stats.throws++;whoosh();
-      const t0=setInterval(()=>{
-        if(!E){clearInterval(t0);res({hit:true,caught:true,done:'closed'})}
-        else if(E.state==='result'){clearInterval(t0);res({hit:true,caught:E.willCatch})}
-        else if(E.state==='rest'){clearInterval(t0);res({hit:false})}},60)},450)})}
-</script>
+    // Single tone with optional pitch slide.
+    function tone(f, d, type, v, slide) {
+      if (!ac()) return;
+      type = type || 'sine';
+      v = v == null ? .16 : v;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const t = audioCtx.currentTime;
+      osc.type = type;
+      osc.frequency.setValueAtTime(f, t);
+      if (slide) osc.frequency.exponentialRampToValueAtTime(Math.max(40, f + slide), t + d);
+      gain.gain.setValueAtTime(v, t);
+      gain.gain.exponentialRampToValueAtTime(.0001, t + d);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + d);
+    }
+
+    // Filtered noise sweep for the throw.
+    function whoosh() {
+      if (!ac()) return;
+      const dur = .22;
+      const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur | 0, audioCtx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.Q.value = 1.1;
+      filter.frequency.setValueAtTime(500, audioCtx.currentTime);
+      filter.frequency.exponentialRampToValueAtTime(2600, audioCtx.currentTime + dur);
+      const gain = audioCtx.createGain();
+      gain.gain.value = .22;
+      src.connect(filter).connect(gain).connect(audioCtx.destination);
+      src.start();
+    }
+
+    // Deterministic 3-note "cry" derived from the species name.
+    function cry(name) {
+      let h = 0;
+      for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+      const base = 300 + (h % 340);
+      const intervals = [0, 4, 7, 12, 5, 9, 2, 7];
+      for (let i = 0; i < 3; i++) {
+        const st = intervals[(h >> (i * 3)) & 7];
+        setTimeout(() => tone(base * Math.pow(2, st / 12), .1, i % 2 ? 'triangle' : 'square', .11), i * 95);
+      }
+    }
+
+    function chime() {
+      [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => tone(f, .24, 'sine', .16), i * 95));
+    }
+    function tickS() { tone(210, .06, 'square', .12); }
+    function popS()  { tone(150, .14, 'square', .26, -80); tone(90, .18, 'sine', .2, -30); }
+    function sadS()  { tone(320, .22, 'sawtooth', .1, -140); }
+
+    /* ============================================================
+       7c. SPECIES
+
+       base/spread → rolled POWER range; diff → catch difficulty 1-5
+       (not shown in the UI — POWER is the single difficulty signal);
+       w → spawn weight; fly → hover height for airborne species.
+       ============================================================ */
+    const SPECIES = [
+      {
+        id: 'woolby', name: 'Woolby', tag: 'Fluff', base: 58, spread: 34, diff: 1, size: 1.05, move: 'hopper', anim: 'anim-bounce', w: 5,
+        svg: '<svg viewBox="0 0 120 120"><rect x="42" y="90" width="10" height="16" rx="5" fill="#c9a97e"/><rect x="68" y="90" width="10" height="16" rx="5" fill="#c9a97e"/><circle cx="60" cy="66" r="30" fill="#f4ead7"/><circle cx="34" cy="70" r="16" fill="#f4ead7"/><circle cx="86" cy="70" r="16" fill="#f4ead7"/><circle cx="46" cy="44" r="17" fill="#f4ead7"/><circle cx="74" cy="44" r="17" fill="#f4ead7"/><ellipse cx="60" cy="72" rx="19" ry="15" fill="#e7d2ae"/><ellipse cx="36" cy="42" rx="6" ry="10" fill="#c9a97e" transform="rotate(-24 36 42)"/><ellipse cx="84" cy="42" rx="6" ry="10" fill="#c9a97e" transform="rotate(24 84 42)"/><circle cx="52" cy="68" r="2.7" fill="#3a3128"/><circle cx="68" cy="68" r="2.7" fill="#3a3128"/><path d="M55 77 Q60 81 65 77" stroke="#3a3128" stroke-width="2.2" fill="none" stroke-linecap="round"/></svg>'
+      },
+      {
+        id: 'pecklet', name: 'Pecklet', tag: 'Chirp', base: 46, spread: 30, diff: 1, size: .8, move: 'hopper', anim: 'anim-flutter', w: 5,
+        svg: '<svg viewBox="0 0 120 120"><path d="M86 62 L110 50 L104 64 L112 72 L88 72 Z" fill="#5aa7c9"/><path d="M50 92 L50 106 M66 92 L66 106" stroke="#f2a54a" stroke-width="4.4" stroke-linecap="round"/><circle cx="58" cy="64" r="30" fill="#8ecfe8"/><ellipse cx="52" cy="76" rx="16" ry="13" fill="#eaf6fb"/><path class="wing" d="M68 56 Q94 50 94 70 Q82 84 64 74 Z" fill="#5aa7c9"/><path d="M52 36 Q54 18 68 20 Q60 26 62 38 Z" fill="#f2a54a"/><path d="M30 60 L10 66 L30 72 Z" fill="#f2a54a"/><circle cx="40" cy="56" r="4.6" fill="#22282e"/><circle cx="41.8" cy="54.2" r="1.6" fill="#fff"/></svg>'
+      },
+      {
+        id: 'sproutle', name: 'Sproutle', tag: 'Sprout', base: 70, spread: 38, diff: 2, size: 1, move: 'walker', anim: 'anim-sway', w: 4,
+        svg: '<svg viewBox="0 0 120 120"><ellipse cx="36" cy="100" rx="11" ry="7" fill="#7fae5c"/><ellipse cx="82" cy="100" rx="11" ry="7" fill="#7fae5c"/><circle cx="27" cy="72" r="15" fill="#a9cf7e"/><circle cx="22" cy="68" r="2.8" fill="#2f3a24"/><path d="M19 78 Q24 81 29 78" stroke="#2f3a24" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M30 98 Q28 48 72 48 Q104 48 104 98 Z" fill="#6f9e4e"/><circle cx="58" cy="74" r="9" fill="#8fbe6b"/><circle cx="82" cy="66" r="7" fill="#8fbe6b"/><circle cx="86" cy="86" r="6" fill="#8fbe6b"/><path d="M64 48 Q64 30 52 26 M64 42 Q74 32 80 36" stroke="#4e7a34" stroke-width="4" fill="none" stroke-linecap="round"/><ellipse cx="50" cy="24" rx="9" ry="5" fill="#69a344" transform="rotate(-22 50 24)"/></svg>'
+      },
+      {
+        id: 'puddlin', name: 'Puddlin', tag: 'Dewdrop', base: 64, spread: 36, diff: 2, size: .92, move: 'slide', anim: 'anim-jelly', w: 4,
+        svg: '<svg viewBox="0 0 120 120"><path d="M60 20 Q78 46 88 62 Q99 81 88 95 Q76 108 60 108 Q44 108 32 95 Q21 81 32 62 Q42 46 60 20 Z" fill="#7cc7ec" opacity=".94"/><ellipse cx="43" cy="62" rx="8" ry="15" fill="#fff" opacity=".55" transform="rotate(-16 43 62)"/><circle cx="50" cy="78" r="3.5" fill="#173a52"/><circle cx="70" cy="78" r="3.5" fill="#173a52"/><path d="M54 88 Q60 93 66 88" stroke="#173a52" stroke-width="2.4" fill="none" stroke-linecap="round"/><circle cx="42" cy="87" r="3.2" fill="#5aa7d6"/><circle cx="78" cy="87" r="3.2" fill="#5aa7d6"/></svg>'
+      },
+      {
+        id: 'flickit', name: 'Flickit', tag: 'Ember', base: 96, spread: 44, diff: 3, size: .94, move: 'dart', anim: 'anim-dart', w: 3,
+        svg: '<svg viewBox="0 0 120 120"><path d="M82 76 Q112 66 106 38 Q118 62 106 84 Q97 94 82 88 Z" fill="#d97f43"/><path d="M104 42 Q113 58 106 74 Q110 56 100 46 Z" fill="#f6e7d2"/><rect x="40" y="88" width="9" height="16" rx="4.5" fill="#c9743c"/><rect x="62" y="88" width="9" height="16" rx="4.5" fill="#c9743c"/><ellipse cx="56" cy="74" rx="26" ry="20" fill="#e8945a"/><circle cx="40" cy="50" r="18" fill="#e8945a"/><path d="M30 38 L25 14 L44 30 Z" fill="#c9743c"/><path d="M46 33 L49 12 L59 31 Z" fill="#c9743c"/><path d="M26 54 L8 60 L26 66 Z" fill="#f6e7d2"/><circle cx="36" cy="47" r="3" fill="#2a2118"/><circle cx="48" cy="45" r="3" fill="#2a2118"/><circle cx="11" cy="60" r="2.8" fill="#2a2118"/><ellipse cx="58" cy="80" rx="9" ry="6" fill="#f6e7d2"/></svg>'
+      },
+      {
+        id: 'buzzlet', name: 'Buzzlet', tag: 'Zap', base: 84, spread: 40, diff: 3, size: .76, move: 'drifter', anim: 'anim-hover', w: 3, fly: 16,
+        svg: '<svg viewBox="0 0 120 120"><ellipse class="wing" cx="34" cy="44" rx="17" ry="8" fill="#dff3ff" opacity=".85" transform="rotate(-32 34 44)"/><ellipse class="wing" cx="86" cy="44" rx="17" ry="8" fill="#dff3ff" opacity=".85" transform="rotate(32 86 44)"/><path d="M52 40 Q46 26 38 24 M68 40 Q74 26 82 24" stroke="#3a3428" stroke-width="3.4" fill="none" stroke-linecap="round"/><circle cx="38" cy="24" r="3.4" fill="#3a3428"/><circle cx="82" cy="24" r="3.4" fill="#3a3428"/><ellipse cx="60" cy="66" rx="30" ry="25" fill="#f4c531"/><path d="M47 43 Q42 66 47 89" stroke="#3a3428" stroke-width="9" fill="none"/><path d="M73 43 Q78 66 73 89" stroke="#3a3428" stroke-width="9" fill="none"/><path d="M60 91 L60 103 M56 103 L64 103" stroke="#3a3428" stroke-width="4" stroke-linecap="round"/><circle cx="53" cy="60" r="3.6" fill="#231f18"/><circle cx="67" cy="60" r="3.6" fill="#231f18"/><path d="M56 69 Q60 72 64 69" stroke="#231f18" stroke-width="2" fill="none" stroke-linecap="round"/></svg>'
+      },
+      {
+        id: 'chilliw', name: 'Chilliw', tag: 'Frost', base: 108, spread: 46, diff: 4, size: .96, move: 'slide', anim: 'anim-shimmy', w: 2,
+        svg: '<svg viewBox="0 0 120 120"><rect x="16" y="64" width="14" height="8" rx="4" fill="#8fd4e8"/><rect x="90" y="64" width="14" height="8" rx="4" fill="#8fd4e8"/><path d="M60 28 L88 45 L88 84 L60 101 L32 84 L32 45 Z" fill="#bfeaf5" stroke="#8fd4e8" stroke-width="3" stroke-linejoin="round"/><path d="M60 42 L78 52 L78 78 L60 88 L42 78 L42 52 Z" fill="#e6f9ff" opacity=".75"/><path d="M60 56 v20 M51 61 l18 10 M69 61 l-18 10" stroke="#69b8d8" stroke-width="3" stroke-linecap="round"/><circle cx="51" cy="55" r="3" fill="#1d4254"/><circle cx="69" cy="55" r="3" fill="#1d4254"/></svg>'
+      },
+      {
+        id: 'wispurr', name: 'Wispurr', tag: 'Veil', base: 126, spread: 50, diff: 4, size: .9, move: 'drifter', anim: 'anim-float', w: 2, fly: 22,
+        svg: '<svg viewBox="0 0 120 120"><path d="M40 44 L34 22 L54 36 Z" fill="#cfc3ee"/><path d="M80 44 L86 22 L66 36 Z" fill="#cfc3ee"/><path d="M42 40 L39 28 L50 37 Z" fill="#e8d9f2"/><path d="M78 40 L81 28 L70 37 Z" fill="#e8d9f2"/><path d="M32 94 Q37 103 45 96 Q51 105 60 98 Q69 105 75 96 Q83 103 88 94 L88 62 Q88 34 60 34 Q32 34 32 62 Z" fill="#cfc3ee"/><ellipse cx="50" cy="62" rx="5" ry="7" fill="#4a3d78"/><ellipse cx="70" cy="62" rx="5" ry="7" fill="#4a3d78"/><circle cx="51.6" cy="59.4" r="1.7" fill="#fff"/><circle cx="71.6" cy="59.4" r="1.7" fill="#fff"/><path d="M55 75 Q60 80 65 75" stroke="#4a3d78" stroke-width="2.2" fill="none" stroke-linecap="round"/><path d="M56 75 l2 4.4 l2 -4.4 M62 75 l2 4.4 l2 -4.4" fill="#fff"/><circle cx="42" cy="70" r="2.4" fill="#b9a8e0"/><circle cx="78" cy="70" r="2.4" fill="#b9a8e0"/></svg>'
+      },
+      {
+        id: 'pebblo', name: 'Pebblo', tag: 'Stone', base: 150, spread: 56, diff: 5, size: 1.15, move: 'statue', anim: 'anim-tremble', w: 1,
+        svg: '<svg viewBox="0 0 120 120"><rect x="12" y="56" width="17" height="28" rx="8.5" fill="#8b8b83"/><rect x="91" y="56" width="17" height="28" rx="8.5" fill="#8b8b83"/><path d="M30 102 L24 66 Q24 40 52 34 Q86 28 94 58 L98 102 Z" fill="#9a9a90"/><path d="M44 52 L52 62 L46 72 M74 44 L70 56 L80 64" stroke="#77776e" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M34 46 Q42 28 60 31 Q80 28 92 52 Q76 44 62 48 Q46 42 34 46 Z" fill="#7fae5c"/><circle cx="48" cy="70" r="4.2" fill="#2e2e28"/><circle cx="72" cy="70" r="4.2" fill="#2e2e28"/><path d="M54 82 Q60 86 66 82" stroke="#2e2e28" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg>'
+      },
+      {
+        id: 'lumina', name: 'Lumina', tag: 'Radiant', base: 180, spread: 60, diff: 5, size: .88, move: 'drifter', anim: 'anim-pulse', w: .7, fly: 26,
+        svg: '<svg viewBox="0 0 120 120"><circle cx="60" cy="66" r="42" fill="#ffe9a3" opacity=".35"/><path d="M60 14 L64 30 L80 30 L67 40 L72 56 L60 46 L48 56 L53 40 L40 30 L56 30 Z" fill="#ffb43b"/><path d="M28 86 Q28 46 60 46 Q92 46 92 86 Z" fill="#ffd45e"/><circle cx="50" cy="68" r="3.2" fill="#7a5410"/><circle cx="70" cy="68" r="3.2" fill="#7a5410"/><path d="M54 77 Q60 83 66 77" stroke="#7a5410" stroke-width="2.4" fill="none" stroke-linecap="round"/><path d="M22 50 l2.4 5.6 5.6 2.4 -5.6 2.4 -2.4 5.6 -2.4 -5.6 -5.6 -2.4 5.6 -2.4 Z" fill="#fff" opacity=".9"/><path d="M96 82 l1.8 4.2 4.2 1.8 -4.2 1.8 -1.8 4.2 -1.8 -4.2 -4.2 -1.8 4.2 -1.8 Z" fill="#fff" opacity=".8"/></svg>'
+      }
+    ];
+
+    const spById = id => SPECIES.find(s => s.id === id);
+
+    /* ============================================================
+       7d. SAVE — persisted in localStorage
+       ============================================================ */
+    const SAVE_KEY = 'wandergrove-v1';
+
+    function loadSave() {
+      try {
+        const s = JSON.parse(localStorage.getItem(SAVE_KEY));
+        if (s && s.v === 1) return s;
+      } catch (e) { /* corrupt save → start fresh */ }
+      return { v: 1, intro: false, hint: false, caught: [], stats: { throws: 0, hits: 0, catches: 0 } };
+    }
+
+    let save = loadSave();
+
+    function persist() {
+      try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch (e) { /* storage unavailable */ }
+    }
+
+    function powerTier(p) {
+      return p < 100 ? 't1' : p < 180 ? 't2' : p < 260 ? 't3' : 't4';
+    }
+
+    /* ============================================================
+       7e. PARTICLE FX — canvas layer over the encounter
+       ============================================================ */
+    const fctx = fxC.getContext('2d');
+    let parts = [];
+
+    function sizeFx() {
+      const d = Math.min(devicePixelRatio || 1, 2);
+      fxC.width = innerWidth * d;
+      fxC.height = innerHeight * d;
+      fctx.setTransform(d, 0, 0, d, 0, 0);
+    }
+    sizeFx();
+
+    function burst(x, y, n, colors, opts) {
+      opts = opts || {};
+      for (let i = 0; i < n; i++) {
+        const a = rand(0, TAU);
+        const speed = rand(opts.s0 || 60, opts.s1 || 260);
+        parts.push({
+          x, y,
+          vx: Math.cos(a) * speed,
+          vy: Math.sin(a) * speed - (opts.up || 60),
+          g: opts.g == null ? 520 : opts.g,
+          life: rand(.5, .95),
+          t: 0,
+          r: rand(2.4, 5.2),
+          c: colors[i % colors.length],
+          sh: opts.sh || ['star', 'circle', 'petal'][i % 3],
+        });
+      }
+    }
+
+    function drawFx(dt) {
+      if (!parts.length) {
+        if (enc.classList.contains('on')) fctx.clearRect(0, 0, innerWidth, innerHeight);
+        return;
+      }
+      fctx.clearRect(0, 0, innerWidth, innerHeight);
+      parts = parts.filter(p => {
+        p.t += dt;
+        if (p.t >= p.life) return false;
+        p.vy += p.g * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        const alpha = 1 - p.t / p.life;
+        fctx.globalAlpha = alpha;
+        fctx.fillStyle = p.c;
+        fctx.save();
+        fctx.translate(p.x, p.y);
+        fctx.rotate(p.t * 6);
+        if (p.sh === 'circle') {
+          fctx.beginPath();
+          fctx.arc(0, 0, p.r, 0, TAU);
+          fctx.fill();
+        } else if (p.sh === 'petal') {
+          fctx.beginPath();
+          fctx.ellipse(0, 0, p.r * 1.5, p.r * .7, 0, 0, TAU);
+          fctx.fill();
+        } else { // star
+          fctx.beginPath();
+          for (let i = 0; i < 5; i++) {
+            const a = -Math.PI / 2 + i * TAU / 5;
+            fctx.lineTo(Math.cos(a) * p.r * 1.8, Math.sin(a) * p.r * 1.8);
+            const a2 = a + TAU / 10;
+            fctx.lineTo(Math.cos(a2) * p.r * .8, Math.sin(a2) * p.r * .8);
+          }
+          fctx.closePath();
+          fctx.fill();
+        }
+        fctx.restore();
+        return true;
+      });
+      fctx.globalAlpha = 1;
+    }
+
+    /* ============================================================
+       8a. MAP — spawning & wandering
+
+       Ground species stay in the meadow band (58.5% of the viewport
+       down); airborne species (those with `fly`) may roam the whole
+       field up into the sky.
+       ============================================================ */
+    let creatures = [];
+
+    const fieldTop = () => innerHeight * .36;   // sky ceiling for flyers
+    const fieldBot = () => innerHeight * .84;   // lower meadow bound
+    const groundTop = () => innerHeight * .585; // meadow floor for walkers
+
+    function pickSpecies() {
+      const count = {};
+      creatures.forEach(o => count[o.sp.id] = (count[o.sp.id] || 0) + 1);
+      const pool = SPECIES.filter(s => (count[s.id] || 0) < 2);
+      let total = 0;
+      pool.forEach(s => total += s.w);
+      let r = Math.random() * total;
+      for (const s of pool) {
+        r -= s.w;
+        if (r <= 0) return s;
+      }
+      return pool[0] || SPECIES[0];
+    }
+
+    function spawnOne(delay) {
+      setTimeout(() => {
+        if (creatures.length >= 6) return;
+        const sp = pickSpecies();
+        const inst = {
+          sp,
+          pow: Math.round(sp.base + Math.random() * sp.spread),
+          hue: Math.round(rand(-16, 16)),
+          scl: rand(.88, 1.16),
+          x: rand(50, innerWidth - 50),
+          y: rand(sp.fly ? fieldTop() : groundTop(), fieldBot()),
+          dir: Math.random() < .5 ? -1 : 1,
+          vx: 0,
+          face: 1,
+          turnT: rand(1, 3),
+          hopT: 0,
+          hopDur: .4,
+          restT: rand(.5, 2),
+          hopY: 0,
+          ph: rand(0, TAU),
+          el: null,
+        };
+        const w = 74 * sp.size * inst.scl;
+        const el = document.createElement('div');
+        el.className = 'crit';
+        el.innerHTML =
+          '<div class="cpw ' + powerTier(inst.pow) + '" style="bottom:' + (w * 1.02) + 'px">' + inst.pow + '</div>' +
+          '<div class="chopt"><div class="cwrap anim-x" style="width:' + w + 'px;height:' + w + 'px;left:' + (-w / 2) + 'px">' +
+          '<div class="cflip">' + sp.svg + '</div></div></div><div class="cshadow"></div>';
+        el.querySelector('.cwrap').classList.remove('anim-x');
+        el.querySelector('.cwrap').classList.add(sp.anim);
+        el.querySelector('.cflip').style.filter = 'hue-rotate(' + inst.hue + 'deg)';
+        el.addEventListener('pointerdown', ev => {
+          ev.stopPropagation();
+          openEncounter(inst);
+        });
+        fieldEl.appendChild(el);
+        inst.el = el;
+        creatures.push(inst);
+      }, delay || 0);
+    }
+
+    function updCreatures(dt, t) {
+      const ft = groundTop();
+      const fb = fieldBot();
+
+      for (const o of creatures) {
+        switch (o.sp.move) {
+          case 'statue':
+            o.vx = 0;
+            break;
+
+          case 'walker':
+            o.turnT -= dt;
+            if (o.turnT <= 0) {
+              o.turnT = rand(2.5, 6);
+              if (Math.random() < .55) o.dir *= -1;
+            }
+            o.vx = o.dir * 14;
+            break;
+
+          case 'slide':
+            o.turnT -= dt;
+            if (o.turnT <= 0) {
+              o.turnT = rand(1.8, 4.5);
+              o.dir = Math.random() < .5 ? -1 : 1;
+            }
+            o.vx = o.dir * 26;
+            break;
+
+          case 'hopper':
+            if (o.hopT > 0) {
+              o.hopT -= dt;
+              const progress = 1 - o.hopT / o.hopDur;
+              o.vx = o.dir * o.hopV;
+              o.hopY = -Math.sin(progress * Math.PI) * 15;
+              if (o.hopT <= 0) {
+                o.hopY = 0;
+                o.vx = 0;
+                o.restT = rand(.9, 2.6);
+              }
+            } else {
+              o.restT -= dt;
+              if (o.restT <= 0) {
+                o.hopDur = rand(.3, .42);
+                o.hopT = o.hopDur;
+                o.dir = Math.random() < .5 ? -1 : 1;
+                o.hopV = rand(46, 92);
+              }
+            }
+            break;
+
+          case 'dart':
+            if (o.hopT > 0) {
+              o.hopT -= dt;
+              const progress = 1 - o.hopT / o.hopDur;
+              o.vx = o.dir * o.hopV;
+              o.hopY = -Math.sin(progress * Math.PI) * 12;
+              if (o.hopT <= 0) {
+                o.hopY = 0;
+                o.vx = 0;
+                o.restT = rand(.4, 1.4);
+              }
+            } else {
+              o.restT -= dt;
+              if (o.restT <= 0) {
+                o.hopDur = rand(.16, .24);
+                o.hopT = o.hopDur;
+                o.dir = Math.random() < .5 ? -1 : 1;
+                o.hopV = rand(120, 190);
+              }
+            }
+            break;
+
+          case 'drifter':
+            o.turnT -= dt;
+            if (o.turnT <= 0) {
+              o.turnT = rand(2, 5);
+              o.dir = Math.random() < .5 ? -1 : 1;
+            }
+            o.vx = o.dir * 17;
+            o.hopY = -(o.sp.fly || 0) + Math.sin(t * 2 + o.ph) * 5;
+            break;
+        }
+
+        o.x += o.vx * dt;
+        if (o.x < 34) {
+          o.x = 34;
+          o.dir = 1;
+          if (o.sp.move !== 'hopper' && o.sp.move !== 'dart') o.vx = Math.abs(o.vx);
+        }
+        if (o.x > innerWidth - 34) {
+          o.x = innerWidth - 34;
+          o.dir = -1;
+          if (o.sp.move !== 'hopper' && o.sp.move !== 'dart') o.vx = -Math.abs(o.vx);
+        }
+        if (o.vx) o.face = o.vx > 0 ? -1 : 1;
+
+        const depth = .78 + .42 * ((o.y - ft) / (fb - ft));
+        o.el.style.transform = 'translate(' + o.x + 'px,' + o.y + 'px) scale(' + (depth * o.scl).toFixed(3) + ')';
+        o.el.querySelector('.chopt').style.transform = 'translateY(' + o.hopY.toFixed(1) + 'px)';
+        o.el.querySelector('.cflip').style.transform = 'scaleX(' + o.face + ')';
+      }
+    }
+
+    /* ============================================================
+       8b. ENCOUNTER — the catch state machine
+
+       rest → held → fly → suck → drop → wobble → result (caught, or
+       broke free → return → rest). A missed throw goes fly → fade →
+       return. The ball is depth-scaled so the toss reads as a real 3D
+       arc, with #flyShadow tracking the ground beneath it.
+       ============================================================ */
+    const GRAVITY = 2000;        // px/s²
+    const THROW_GAIN = 8;        // drag distance → launch speed multiplier
+    const MAX_THROW_SPEED = 2700; // px/s speed cap
+
+    let encounter = null;   // active encounter state (null = none)
+    let pointerVel = { x: 0, y: 0 }; // smoothed flick velocity
+    let lastPointer = null; // { x, y, t } of the previous pointermove
+
+    // Did the segment (x0,y0)→(x1,y1) come within r of (cx,cy)?
+    // Swept test so fast throws can't tunnel through the target.
+    function segCircle(x0, y0, x1, y1, cx, cy, r) {
+      const dx = x1 - x0;
+      const dy = y1 - y0;
+      const lenSq = dx * dx + dy * dy;
+      let t = lenSq ? ((cx - x0) * dx + (cy - y0) * dy) / lenSq : 0;
+      t = clamp(t, 0, 1);
+      const px = x0 + dx * t - cx;
+      const py = y0 + dy * t - cy;
+      return px * px + py * py <= r * r;
+    }
+
+    // Launch velocity from the drag vector plus the flick velocity.
+    function throwVel() {
+      const dx = encounter.bx - encounter.press.x;
+      const dy = encounter.by - encounter.press.y;
+      let vx = dx * THROW_GAIN + pointerVel.x * .5;
+      let vy = dy * THROW_GAIN + pointerVel.y * .5;
+      const speed = Math.hypot(vx, vy);
+      if (speed > MAX_THROW_SPEED) {
+        vx *= MAX_THROW_SPEED / speed;
+        vy *= MAX_THROW_SPEED / speed;
+      }
+      return { vx, vy };
+    }
+
+    // 1 at the player's hand → ~0.6 at the critter's distance.
+    function depthScale(y) {
+      return 1 - .42 * clamp((encounter.restY - y) / (encounter.restY - encounter.crit.y + 40), 0, 1);
+    }
+
+    function ballTo(x, y) {
+      if (!encounter) return;
+      encounter.bx = x;
+      encounter.by = y;
+      if (encounter.state === 'held' || encounter.state === 'fly' || encounter.state === 'return') {
+        encounter.bsc = depthScale(y);
+      } else if (encounter.state === 'rest') {
+        encounter.bsc = 1;
+      }
+      ballEl.style.transform =
+        'translate3d(' + (x - 32) + 'px,' + (y - 32) + 'px,0) scale(' + (encounter.bsc || 1).toFixed(3) + ')';
+    }
+
+    function ballRot(deg) {
+      ballIn.style.transform = 'rotate(' + deg + 'deg)';
+    }
+
+    function setPlate(inst) {
+      const sp = inst.sp;
+      $('#encName').textContent = sp.name;
+      $('#encTag').textContent = sp.tag + ' · ' + (
+        sp.diff <= 2 ? 'common' : sp.diff === 3 ? 'uncommon' : sp.diff === 4 ? 'rare' : 'very rare'
+      );
+      $('#encPowN').textContent = inst.pow;
+      $('#encPowN').style.color = {
+        t1: '#6b7a4a', t2: '#2f8a52', t3: '#2f6cb8', t4: '#7d3fc4',
+      }[powerTier(inst.pow)];
+    }
+
+    function openEncounter(inst) {
+      if (encounter) return;
+      ac();
+      cry(inst.sp.name);
+
+      const W = innerWidth;
+      const H = innerHeight;
+      const critSize = Math.round(180 * inst.sp.size * inst.scl);
+
+      enc.classList.add('on');
+      const crit = { x: W * .5, y: H * .40, r: Math.min(92, 44 * inst.sp.size * inst.scl + 26) };
+
+      encounter = {
+        W, H, inst, crit,
+        state: 'rest',
+        bx: W * .5, by: H - 118,          // ball position
+        restX: W * .5, restY: H - 118,    // ball tray
+        groundY: H * .62,
+        vx: 0, vy: 0,
+        hold: false, press: null,
+        ringM: 1.9, ringT: 0,             // shrinking focus ring
+        spin: 0, bsc: 1,                  // ball spin & depth scale
+        critSize,
+        wobN: 0, wobT: 0, lastWob: -1,    // wobble before resolve
+        bounces: 0, fade: 0, willCatch: false,
+      };
+
+      encCritIn.className = '';
+      encCritIn.style.opacity = 1;
+      encCritIn.style.transform = '';
+      stampEl.classList.remove('show');
+      ringEl.classList.remove('flash');
+      encHop.style.left = '50%';
+
+      const critBox = encCritIn.parentElement;
+      critBox.style.width = critSize + 'px';
+      critBox.style.height = critSize + 'px';
+      critBox.style.transform = 'translate(-50%,-50%)';
+      encWrap.style.cssText = 'width:' + critSize + 'px;height:' + critSize + 'px;left:' + (-critSize / 2) + 'px;bottom:0';
+      const shadow = encCritIn.querySelector('.cshadow');
+      shadow.style.cssText = 'width:' + (critSize * .5) + 'px;left:' + (-critSize * .25) + 'px;bottom:-8px;top:auto;margin-left:0';
+      encWrap.className = 'cwrap ' + inst.sp.anim;
+      encWrap.innerHTML = '<div class="cflip" style="filter:hue-rotate(' + inst.hue + 'deg)">' + inst.sp.svg + '</div>';
+      encHop.style.transform = '';
+
+      // Float the name/POWER pills just above the critter's head.
+      $('#encLabel').style.top = (H * .40 - critSize / 2 - 72) + 'px';
+      flyShadowEl.style.opacity = 0;
+
+      setPlate(inst);
+      ballIn.innerHTML = BALL_SVG;
+      ballEl.classList.remove('hide', 'glow');
+      ballRot(0);
+      ballTo(encounter.restX, encounter.restY);
+      $('#ribbon').classList.remove('show');
+
+      if (!save.hint) {
+        save.hint = true;
+        persist();
+        $('#mapHint').style.display = 'none';
+      }
+      sizeFx();
+    }
+
+    function closeEncounter() {
+      enc.classList.remove('on');
+      encounter = null;
+      parts = [];
+    }
+
+    function showRibbon(txt) {
+      ribbonEl.textContent = txt;
+      ribbonEl.classList.add('show');
+      setTimeout(() => ribbonEl.classList.remove('show'), 1000);
+    }
+
+    function showStamp(txt) {
+      stampEl.textContent = txt;
+      stampEl.classList.remove('show');
+      void stampEl.offsetWidth; // restart the stamp animation
+      stampEl.classList.add('show');
+    }
+
+    // Catch probability from ring timing, species difficulty and POWER.
+    function catchChance(ringM, diff, pow) {
+      let p = .9 - diff * .075;
+      if (ringM < .85) p += .18;      // EXCELLENT
+      else if (ringM < 1.25) p += .10; // GREAT
+      else p += .04;                   // NICE
+      p -= clamp((pow - 180) / 1200, 0, .12);
+      return clamp(p, .42, .97);
+    }
+
+    function onHit() {
+      encounter.state = 'suck';
+      save.stats.hits++;
+      flyShadowEl.style.opacity = 0;
+
+      const ring = encounter.ringM;
+      const label = ring < .85 ? 'EXCELLENT!' : ring < 1.25 ? 'GREAT!' : 'NICE!';
+      showRibbon(label);
+
+      encounter.willCatch = Math.random() < catchChance(encounter.ringM, encounter.inst.sp.diff, encounter.inst.pow);
+      ballTo(encounter.crit.x, encounter.crit.y - 4);
+      ringEl.classList.add('flash');
+      encCritIn.classList.add('sucked');
+      tone(880, .14, 'sine', .18, 620);
+      burst(encounter.crit.x, encounter.crit.y, 16, ['#ffd45e', '#fff8dd', '#8fd9a0'], { up: 40 });
+
+      setTimeout(() => {
+        if (!encounter) return;
+        encounter.state = 'drop';
+        encounter.vx = rand(-26, 26);
+        encounter.vy = -60;
+        ballEl.classList.add('glow');
+      }, 360);
+    }
+
+    function resolveWobble() {
+      encounter.state = 'result';
+      flyShadowEl.style.opacity = 0;
+
+      if (encounter.willCatch) {
+        // ---- caught ----
+        chime();
+        showStamp('CAUGHT!');
+        burst(encounter.bx, encounter.by - 30, 34, ['#ffd45e', '#fff', '#8fd9a0', '#7cc7ec'], { up: 150, s1: 340, sh: 'star' });
+
+        save.stats.catches = (save.stats.catches || 0) + 1;
+        save.caught.push({
+          id: encounter.inst.sp.id,
+          pow: encounter.inst.pow,
+          hue: encounter.inst.hue,
+          scl: encounter.inst.scl,
+          at: Date.now(),
+        });
+        persist();
+        refreshJCount();
+
+        const caught = encounter.inst;
+        caught.leaving = true;
+        caught.el.classList.add('leaving');
+        playerWalkTo(caught.x);
+        setTimeout(() => {
+          const i = creatures.indexOf(caught);
+          if (i >= 0) creatures.splice(i, 1);
+          caught.el.remove();
+          spawnOne(rand(2200, 4200));
+        }, 480);
+        setTimeout(closeEncounter, 1050);
+      } else {
+        // ---- broke free ----
+        popS();
+        sadS();
+        showStamp('BROKE FREE!');
+        ballEl.classList.add('hide');
+        burst(encounter.bx, encounter.by - 20, 20, ['#fff', '#dff3ff', '#cfe3b8'], { up: 110, s1: 300 });
+        encCritIn.classList.remove('sucked');
+        encCritIn.classList.add('pop');
+        requestAnimationFrame(() => encCritIn.classList.add('angry'));
+        persist();
+        setTimeout(() => {
+          if (!encounter) return;
+          ballEl.classList.remove('glow', 'hide');
+          encounter.state = 'return';
+        }, 820);
+      }
+    }
+
+    function missBall() {
+      encounter.state = 'fade';
+      encounter.fade = .4;
+      flyShadowEl.style.opacity = 0;
+      sadS();
+    }
+
+    // Ground shadow under the airborne ball; taller = fainter & smaller.
+    function updateFlyShadow(minAlpha) {
+      const hf = clamp(1 - (encounter.groundY - encounter.by) / 380, minAlpha, 1);
+      flyShadowEl.style.opacity = (.3 * hf * encounter.bsc).toFixed(3);
+      flyShadowEl.style.transform =
+        'translate3d(' + encounter.bx.toFixed(1) + 'px,' + (encounter.groundY - 4) + 'px,0) scale(' +
+        (encounter.bsc * hf).toFixed(3) + ')';
+    }
+
+    function updEnc(dt) {
+      // Focus ring breathes over the critter; scale cycles 1.9 → 0.65.
+      if (encounter.state === 'rest' || encounter.state === 'held' || encounter.state === 'fly') {
+        encounter.ringT = (encounter.ringT + dt) % 4.3;
+        encounter.ringM = 1.9 - (encounter.ringT / 4.3) * 1.25;
+        ringEl.style.transform = 'scale(' + encounter.ringM.toFixed(3) + ')';
+      }
+
+      switch (encounter.state) {
+        case 'fly': {
+          const prevX = encounter.bx;
+          const prevY = encounter.by;
+          encounter.vy += GRAVITY * dt;
+          encounter.bx += encounter.vx * dt;
+          encounter.by += encounter.vy * dt;
+          if (encounter.bx < 22) { encounter.bx = 22; encounter.vx *= -.5; }
+          if (encounter.bx > encounter.W - 22) { encounter.bx = encounter.W - 22; encounter.vx *= -.5; }
+          if (encounter.by < -140) encounter.by = -140;
+          encounter.spin += encounter.vx * dt * .9;
+          ballRot(encounter.spin % 360);
+          updateFlyShadow(.35);
+
+          if (segCircle(prevX, prevY, encounter.bx, encounter.by, encounter.crit.x, encounter.crit.y, encounter.crit.r)) {
+            onHit();
+            break;
+          }
+          if (encounter.vy > 0 && encounter.by >= encounter.groundY) {
+            encounter.by = encounter.groundY;
+            encounter.bounces++;
+            encounter.vy = -encounter.vy * .42;
+            encounter.vx *= .65;
+            tickS();
+            if (encounter.bounces >= 2 || Math.abs(encounter.vy) < 130) missBall();
+            break;
+          }
+          if (encounter.by > encounter.H + 60) missBall();
+          ballTo(encounter.bx, encounter.by);
+          break;
+        }
+
+        case 'drop': {
+          encounter.vy += GRAVITY * dt;
+          encounter.bx += encounter.vx * dt;
+          encounter.by += encounter.vy * dt;
+          updateFlyShadow(.4);
+          if (encounter.by >= encounter.groundY) {
+            encounter.by = encounter.groundY;
+            ballTo(encounter.bx, encounter.by);
+            encounter.wobN = encounter.willCatch ? 3 : (Math.random() < .5 ? 1 : 2);
+            encounter.wobT = 0;
+            encounter.lastWob = -1;
+            encounter.state = 'wobble';
+            break;
+          }
+          ballTo(encounter.bx, encounter.by);
+          break;
+        }
+
+        case 'wobble': {
+          encounter.wobT += dt;
+          const tickDur = .7;
+          flyShadowEl.style.opacity = (.3 * encounter.bsc).toFixed(3);
+          flyShadowEl.style.transform =
+            'translate3d(' + encounter.bx.toFixed(1) + 'px,' + (encounter.groundY - 4) + 'px,0) scale(' +
+            encounter.bsc.toFixed(3) + ')';
+          const tickIdx = Math.floor(encounter.wobT / tickDur);
+          if (tickIdx !== encounter.lastWob && tickIdx < encounter.wobN) {
+            encounter.lastWob = tickIdx;
+            tickS();
+          }
+          if (encounter.wobT >= encounter.wobN * tickDur) {
+            ballRot(0);
+            resolveWobble();
+            break;
+          }
+          const phase = (encounter.wobT % tickDur) / tickDur;
+          ballRot(Math.sin(phase * TAU) * 16 * (1 - tickIdx * .12));
+          break;
+        }
+
+        case 'fade':
+          encounter.fade -= dt;
+          ballEl.style.opacity = Math.max(0, encounter.fade / .4);
+          if (encounter.fade <= 0) {
+            ballEl.style.opacity = 1;
+            encounter.state = 'return';
+          }
+          break;
+
+        case 'return': {
+          const k = 1 - Math.exp(-dt * 9);
+          encounter.bx += (encounter.restX - encounter.bx) * k;
+          encounter.by += (encounter.restY - encounter.by) * k;
+          ballTo(encounter.bx, encounter.by);
+          ballRot(0);
+          if (Math.abs(encounter.restX - encounter.bx) < 1.2 && Math.abs(encounter.restY - encounter.by) < 1.2) {
+            ballTo(encounter.restX, encounter.restY);
+            ballEl.classList.remove('glow');
+            encounter.state = 'rest';
+            stampEl.classList.remove('show');
+          }
+          break;
+        }
+      }
+    }
+
+    /* ============================================================
+       8c. THE GLOWSEED (ball sprite)
+       ============================================================ */
+    const BALL_SVG =
+      '<svg viewBox="0 0 120 120">' +
+      '<defs><radialGradient id="gsB" cx="38%" cy="30%" r="80%">' +
+      '<stop offset="0%" stop-color="#dcf8d2"/><stop offset="45%" stop-color="#8fd9a0"/>' +
+      '<stop offset="100%" stop-color="#3f9e86"/></radialGradient>' +
+      '<radialGradient id="gsC" cx="50%" cy="50%" r="50%">' +
+      '<stop offset="0%" stop-color="#fff6cf"/><stop offset="55%" stop-color="#ffd45e"/>' +
+      '<stop offset="100%" stop-color="#ffb43b" stop-opacity="0"/></radialGradient></defs>' +
+      '<g transform="translate(60 20)"><path d="M0 6 L0 16" stroke="#3e7a3a" stroke-width="4.5" stroke-linecap="round"/>' +
+      '<path d="M0 6 Q-3 -9 -16 -11 Q-5 -14 2 -4 Z" fill="#4e9e4a"/>' +
+      '<path d="M0 6 Q3 -9 16 -11 Q5 -14 -2 -4 Z" fill="#6fbe5e"/></g>' +
+      '<circle cx="60" cy="68" r="42" fill="url(#gsB)"/>' +
+      '<circle cx="60" cy="68" r="13" fill="url(#gsC)"/>' +
+      '<g transform="rotate(-8 60 68)"><ellipse cx="60" cy="68" rx="42" ry="9.5" fill="none" stroke="#e8b23a" stroke-width="6.5"/>' +
+      '<circle cx="18" cy="68" r="2.6" fill="#c98f2a"/><circle cx="102" cy="68" r="2.6" fill="#c98f2a"/></g>' +
+      '<ellipse cx="45" cy="47" rx="10" ry="6" fill="#fff" opacity=".8" transform="rotate(-24 45 47)"/>' +
+      '<circle cx="80" cy="90" r="4" fill="#fff" opacity=".35"/></svg>';
+
+    /* ============================================================
+       9a. INPUT — grab the ball anywhere in the lower half
+
+       The parallax pointermove listener above is separate; this one
+       only tracks the flick while the ball is held.
+       ============================================================ */
+    enc.addEventListener('pointerdown', e => {
+      if (!encounter || encounter.state !== 'rest') return;
+      if (e.clientY < encounter.H * .5) return;
+      encounter.hold = true;
+      encounter.press = { x: e.clientX, y: e.clientY };
+      pointerVel = { x: 0, y: 0 };
+      lastPointer = { x: e.clientX, y: e.clientY, t: performance.now() };
+      encounter.state = 'held';
+      ballTo(clamp(e.clientX, 30, encounter.W - 30), clamp(e.clientY, encounter.H * .32, encounter.H - 70));
+    });
+
+    window.addEventListener('pointermove', e => {
+      if (!encounter || !encounter.hold || encounter.state !== 'held') return;
+      const t = performance.now();
+      if (lastPointer) {
+        const d = (t - lastPointer.t) / 1000;
+        if (d > .004) {
+          const nvx = (e.clientX - lastPointer.x) / d;
+          const nvy = (e.clientY - lastPointer.y) / d;
+          pointerVel.x = pointerVel.x * .35 + nvx * .65;
+          pointerVel.y = pointerVel.y * .35 + nvy * .65;
+        }
+      }
+      lastPointer = { x: e.clientX, y: e.clientY, t };
+      ballTo(clamp(e.clientX, 30, encounter.W - 30), clamp(e.clientY, encounter.H * .32, encounter.H - 70));
+    });
+
+    function releaseBall() {
+      if (!encounter || !encounter.hold || encounter.state !== 'held') return;
+      encounter.hold = false;
+      const v = throwVel();
+      encounter.vx = v.vx;
+      encounter.vy = v.vy;
+      encounter.state = 'fly';
+      encounter.bounces = 0;
+      encounter.spin = 0;
+      save.stats.throws++;
+      whoosh();
+    }
+
+    window.addEventListener('pointerup', releaseBall);
+    window.addEventListener('pointercancel', releaseBall);
+
+    // Touch fallback for browsers without PointerEvent.
+    enc.addEventListener('touchstart', e => {
+      if (window.PointerEvent) return;
+      const t = e.touches[0];
+      enc.dispatchEvent(new PointerEvent('pointerdown', { clientX: t.clientX, clientY: t.clientY }));
+    }, { passive: true });
+
+    window.addEventListener('touchmove', e => {
+      if (window.PointerEvent || !encounter || !encounter.hold) return;
+      const t = e.touches[0];
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: t.clientX, clientY: t.clientY }));
+    }, { passive: true });
+
+    window.addEventListener('touchend', e => {
+      if (window.PointerEvent || !encounter || !encounter.hold) return;
+      window.dispatchEvent(new PointerEvent('pointerup', {}));
+    }, { passive: true });
+
+    $('#btnBack').addEventListener('click', () => {
+      if (encounter && encounter.state === 'rest') closeEncounter();
+    });
+
+    window.addEventListener('resize', () => {
+      sizeFx();
+      if (encounter) {
+        encounter.W = innerWidth;
+        encounter.H = innerHeight;
+        encounter.crit.x = innerWidth * .5;
+        encounter.crit.y = innerHeight * .40;
+        encounter.restX = innerWidth * .5;
+        encounter.restY = innerHeight - 118;
+        encounter.groundY = innerHeight * .62;
+        $('#encLabel').style.top = (encounter.H * .40 - encounter.critSize / 2 - 72) + 'px';
+        if (encounter.state === 'rest' || encounter.state === 'return') ballTo(encounter.restX, encounter.restY);
+      }
+      if (playerPx != null) {
+        const tx = clamp(playerPx, innerWidth * .14, innerWidth * .86);
+        if (tx !== playerPx) {
+          playerPx = tx;
+          playerEl.style.left = tx + 'px';
+        }
+      }
+    });
+
+    /* ============================================================
+       9b. SHEETS — journal & how-to
+       ============================================================ */
+    function refreshJCount() {
+      const unique = new Set(save.caught.map(c => c.id));
+      $('#jCount').textContent = unique.size;
+    }
+
+    function journalHtml() {
+      const unique = new Set(save.caught.map(c => c.id));
+      const tosses = save.stats.throws || 0;
+      let html =
+        '<div class="jstat">' + unique.size + ' of 10 species met &middot; ' + save.caught.length +
+        ' caught &middot; ' + tosses + (tosses === 1 ? ' toss' : ' tosses') + '</div>';
+
+      if (!save.caught.length) {
+        html += '<div class="jempty">No critters yet.<br>Go tap one in the park!</div>';
+        return html;
+      }
+
+      const groups = {};
+      save.caught.forEach(c => {
+        const g = groups[c.id] || (groups[c.id] = { n: 0, best: 0, at: 0 });
+        g.n++;
+        if (c.pow > g.best) g.best = c.pow;
+        if (c.at > g.at) g.at = c.at;
+      });
+      html += '<div class="jgrid">' + Object.keys(groups).map(id => {
+        const sp = spById(id);
+        const g = groups[id];
+        const tier = powerTier(g.best);
+        return '<div class="jcard">' + sp.svg +
+          '<div class="jn">' + sp.name + '</div>' +
+          '<div class="jt">' + sp.tag + '</div>' +
+          '<div class="jp ' + tier + '">PW ' + g.best + '</div>' +
+          '<div class="jc">x' + g.n + '</div></div>';
+      }).join('') + '</div>';
+      return html;
+    }
+
+    function guideHtml() {
+      return (
+        '<div class="gline"><div class="gnum">1</div><div class="gtxt">Critters wander the park on their own. Tap one to walk up close.</div></div>' +
+        '<div class="gline"><div class="gnum">2</div><div class="gtxt">Press anywhere in the lower half, then flick to toss the Glowseed — it flies in the direction you flick it, like a real throw.</div></div>' +
+        '<div class="gline"><div class="gnum">3</div><div class="gtxt">The white ring shrinks over the critter. A hit while it is small gives EXCELLENT or GREAT bonus odds.</div></div>' +
+        '<div class="gline"><div class="gnum">4</div><div class="gtxt">The POWER badge hints how stubborn a critter is. Higher POWER, more resistance.</div></div>'
+      );
+    }
+
+    function openSheet(kind) {
+      const body = $('#sheetBody');
+      const title = $('#sheetTitle');
+      if (kind === 'journal') {
+        title.textContent = 'Journal';
+        body.innerHTML = journalHtml();
+      } else {
+        title.textContent = 'How to play';
+        body.innerHTML = guideHtml();
+      }
+      $('#sheetBack').classList.add('on');
+      $('#sheet').classList.add('on');
+    }
+
+    function closeSheet() {
+      $('#sheetBack').classList.remove('on');
+      $('#sheet').classList.remove('on');
+    }
+
+    $('#btnJournal').addEventListener('click', () => { ac(); openSheet('journal'); });
+    $('#btnGuide').addEventListener('click', () => { ac(); openSheet('guide'); });
+    $('#sheetClose').addEventListener('click', closeSheet);
+    $('#sheetBack').addEventListener('click', closeSheet);
+
+    /* ============================================================
+       9c. INTRO
+       ============================================================ */
+    if (save.intro) $('#intro').classList.add('hidden');
+    if (save.hint) $('#mapHint').style.display = 'none';
+
+    $('#btnStart').addEventListener('click', () => {
+      ac();
+      save.intro = true;
+      persist();
+      $('#intro').classList.add('hidden');
+      if (!save.hint) $('#mapHint').style.display = '';
+      tone(660, .12, 'sine', .14, 220);
+    });
+
+    /* ============================================================
+       9d. MAIN LOOP & BOOT
+       ============================================================ */
+    let lastT = performance.now();
+
+    function loop(now) {
+      const dt = Math.min(.032, (now - lastT) / 1000);
+      lastT = now;
+      updCreatures(dt, now / 1000);
+      updParallax(dt);
+      if (encounter) updEnc(dt);
+      drawFx(dt);
+      requestAnimationFrame(loop);
+    }
+
+    refreshJCount();
+    for (let i = 0; i < 6; i++) spawnOne(i * 120);
+    requestAnimationFrame(loop);
+
+    /* ============================================================
+       9e. AUTOTEST HOOK
+
+       Scripted throw used by smoke tests. Resolves with
+       { hit: true, caught: bool } on a hit, { hit: false } on a miss,
+       or { err } if the encounter could not start.
+       ============================================================ */
+    window.__testCatch = function (spIdx) {
+      spIdx = spIdx || 0;
+      return new Promise(res => {
+        if (encounter) closeEncounter();
+        const inst = creatures.find(o => o.sp === SPECIES[spIdx]) || creatures[0];
+        openEncounter(inst);
+        setTimeout(() => {
+          if (!encounter) return res({ err: 'no encounter' });
+          const T = .55; // flight time to the critter
+          encounter.vx = (encounter.crit.x - encounter.bx) / T;
+          encounter.vy = (encounter.crit.y - encounter.by) / T - .5 * GRAVITY * T;
+          encounter.state = 'fly';
+          encounter.bounces = 0;
+          save.stats.throws++;
+          whoosh();
+          const poll = setInterval(() => {
+            if (!encounter) {
+              clearInterval(poll);
+              res({ hit: true, caught: true, done: 'closed' });
+            } else if (encounter.state === 'result') {
+              clearInterval(poll);
+              res({ hit: true, caught: encounter.willCatch });
+            } else if (encounter.state === 'rest') {
+              clearInterval(poll);
+              res({ hit: false });
+            }
+          }, 60);
+        }, 450);
+      });
+    };
+  </script>
 </body>
 </html>
