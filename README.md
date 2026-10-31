@@ -6,16 +6,6 @@ Wandergrove is a cozy critter-catching mini-game that ships as a **single,
 dependency-free HTML file** — all the art, audio, physics, UI, and save data live
 inside `index.html`. No build step, no server, no network access required.
 
-## ▶️ Playing
-
-Open `index.html` in any modern browser (double-clicking the file works), or
-serve the folder and visit it:
-
-```bash
-# any static file server will do, e.g.
-python -m http.server 8000
-```
-
 The layout is responsive and safe-area aware, so it plays nicely in a narrow
 desktop window or on a phone, with mouse or touch.
 
@@ -33,8 +23,7 @@ desktop window or on a phone, with mouse or touch.
 If the critter breaks free, the Glowseed drops back — grab it and try again.
 Caught critters are logged in the **Journal** (the book icon at the bottom-left),
 which tracks how many of the 10 species you have met, your best POWER per
-species, and your total tosses. Progress persists in `localStorage` between
-sessions.
+species, and your total tosses. Progress persists between sessions.
 
 ## 🐾 The critters
 
